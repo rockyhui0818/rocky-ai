@@ -189,6 +189,8 @@ const demoCredentials = {
 const state = {
   images: [],
   latestPrompt: "",
+  latestRemoteResult: null,
+  latestRemoteStatus: "",
   accounts: loadStoredJson("commerceStudio.accounts", defaultAccounts),
   usageLogs: loadStoredJson("commerceStudio.usageLogs", defaultUsageLogs),
   currentAccountId: localStorage.getItem("commerceStudio.sessionAccountId") || "",
@@ -667,11 +669,21 @@ function renderOutputs() {
       <div class="signal"><b>Payload</b><span>${escapeHtml(pack.model.payload)}</span></div>
       <div class="signal"><b>市场</b><span>Brazil / pt-BR</span></div>
     </div>
+    ${renderRemoteResult()}
     <h3>后端请求草案</h3>
     <div class="data-block">${escapeHtml(JSON.stringify(buildApiDraft(pack), null, 2))}</div>
   `;
 
   renderAdminOutput(pack);
+}
+
+function renderRemoteResult() {
+  if (!state.latestRemoteStatus && !state.latestRemoteResult) return "";
+  return `
+    <h3>真实 API 返回</h3>
+    <p>${escapeHtml(state.latestRemoteStatus || "已连接后端接口")}</p>
+    <div class="data-block">${escapeHtml(JSON.stringify(state.latestRemoteResult || {}, null, 2))}</div>
+  `;
 }
 
 function renderAccountControls(pack = buildPromptPack()) {
@@ -974,6 +986,28 @@ function buildApiDraft(pack) {
   };
 }
 
+async function requestRemoteGeneration(pack) {
+  const response = await fetch("/api/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(buildApiDraft(pack))
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.message || data.error || "后端生成接口调用失败");
+    error.payload = data;
+    throw error;
+  }
+  return data;
+}
+
+function getRemoteTokenUsage(remoteData) {
+  return Number(remoteData?.usage?.total_tokens || remoteData?.usage?.totalTokens || 0);
+}
+
 function buildAdminApiDraft(pack) {
   const account = getCurrentAccount();
   if (!account) return {};
@@ -1016,7 +1050,7 @@ function buildAdminApiDraft(pack) {
   };
 }
 
-function recordUsageEvent(pack) {
+function recordUsageEvent(pack, tokenOverride) {
   const account = getCurrentAccount();
   if (!canUseSelection(account, els.platform.value, els.modelProvider.value)) return;
 
@@ -1029,7 +1063,7 @@ function recordUsageEvent(pack) {
     platform: els.platform.value,
     model: els.modelProvider.value,
     units,
-    tokens: estimateTokenUsage(pack),
+    tokens: tokenOverride || estimateTokenUsage(pack),
     success: true
   });
   persistAccountState();
@@ -1113,11 +1147,27 @@ els.imageInput.addEventListener("change", (event) => {
   renderOutputs();
 });
 
-els.generateBtn.addEventListener("click", () => {
+els.generateBtn.addEventListener("click", async () => {
   const pack = buildPromptPack();
-  recordUsageEvent(pack);
-  renderOutputs();
-  activateTab("image");
+  const originalText = els.generateBtn.textContent;
+  els.generateBtn.disabled = true;
+  els.generateBtn.textContent = "正在调用 API...";
+
+  try {
+    const remoteData = await requestRemoteGeneration(pack);
+    state.latestRemoteResult = remoteData.result || remoteData.rawText || remoteData;
+    state.latestRemoteStatus = `真实 API 已返回，模型：${remoteData.model || pack.model.model}`;
+    recordUsageEvent(pack, getRemoteTokenUsage(remoteData));
+    activateTab("api");
+  } catch (error) {
+    state.latestRemoteResult = error.payload || { message: error.message };
+    state.latestRemoteStatus = "未连接到后端 API，已回退为本地提示词生成模式。";
+    recordUsageEvent(pack);
+    activateTab("image");
+  } finally {
+    els.generateBtn.textContent = originalText;
+    renderOutputs();
+  }
 });
 
 els.copyBtn.addEventListener("click", async () => {

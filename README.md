@@ -18,15 +18,30 @@
 
 直接用浏览器打开 `index.html` 即可使用。
 
+## 接入真实 API
+
+当前前端会优先调用 `/api/generate`。如果部署环境不支持后端函数，或没有配置 API Key，会自动回退到本地提示词演示模式。
+
+不要把真实 API Key 写进 `app.js`、`index.html` 或提交到 GitHub。部署到 Vercel 时，在 Project Settings -> Environment Variables 添加：
+
+- `OPENAI_API_KEY`: 你的模型 API Key
+- `OPENAI_BASE_URL`: OpenAI 兼容接口地址，默认 `https://api.openai.com/v1`
+- `OPENAI_TEXT_MODEL`: 文本生成模型，默认 `gpt-5.5-pro`
+
+如果你使用的是第三方 OpenAI 兼容端口，只需要把 `OPENAI_BASE_URL` 改成你的 API Base URL，例如 `https://api.example.com/v1`。
+
+前端发送给 `/api/generate` 的内容包括：账号信息、平台、产品链接、关键词、卖点、图片文件元信息、图片提示词和详情页提示词。后端会返回结构化 JSON，并把真实 `usage.total_tokens` 记录到 Dashboard。
+
 ## 公网部署
 
-这是纯静态站点，可以部署到 Vercel、Netlify、Cloudflare Pages 或任意静态服务器。
+如果只用 GitHub Pages，这是纯静态站点，可以正常展示页面，但不能执行 `/api/generate` 后端函数。要调用真实 API，推荐部署到 Vercel。
 
 Vercel 设置：
 
 - Framework Preset: `Other`
 - Build Command: `node --check app.js`
 - Output Directory: `.`
+- Environment Variables: 按“接入真实 API”填写 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_TEXT_MODEL`
 
 Netlify 设置：
 
