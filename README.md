@@ -9,7 +9,7 @@
 - 支持多条产品链接：可同时粘贴美国竞品链接和巴西本地链接，分别拆解卖点、设计方向、主图详情页方向和本地化优化线索。
 - 输入中文卖点，生成面向巴西葡语市场的图片提示词和详情页提示词。
 - 覆盖 Amazon Brasil、Mercado Livre、TikTok Shop、Shopee Brasil 和四平台通用方案。
-- 链接拆解、图片提示词和详情页生成默认第一优先级使用 `ChatGPT 5.5 Pro 最高级模型`，接口草案模型 ID 为 `gpt-5.5-pro`。
+- 链接拆解、图片提示词和详情页生成默认第一优先级使用 `ChatGPT 5.5 Pro 最高级模型`，接口草案模型 ID 为 `gpt-5.5`。
 - 保留 Gemini、Claude、ComfyUI、本地模型和纯提示词模式作为备用 API 选项。
 - 支持人工修正关键词：手动输入关键词后会覆盖自动拆解关键词，用于图片生成和详情页生成。
 - 支持主管理员和子账号模拟：平台权限、模型权限、额度、状态、最近使用记录和全局监控。
@@ -26,7 +26,7 @@
 
 - `OPENAI_API_KEY`: 你的模型 API Key
 - `OPENAI_BASE_URL`: OpenAI 兼容接口地址，默认 `https://api.openai.com/v1`
-- `OPENAI_TEXT_MODEL`: 文本生成模型，默认 `gpt-5.5-pro`
+- `OPENAI_TEXT_MODEL`: 文本生成模型，默认 `gpt-5.5`
 - `SUPABASE_URL`: Supabase Project URL
 - `SUPABASE_SERVICE_ROLE_KEY`: Supabase service_role key，仅放后端环境变量，不能暴露到前端
 - `SESSION_SECRET`: 任意长随机字符串，用于签发登录 token

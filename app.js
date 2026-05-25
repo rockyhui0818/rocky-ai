@@ -55,7 +55,7 @@ const modelProfiles = {
   openai: {
     label: "ChatGPT 5.5 Pro 最高级模型",
     endpoint: "/api/generate/openai",
-    model: "gpt-5.5-pro",
+    model: "gpt-5.5",
     imageModel: "gpt-5.5",
     payload: "links[] + image[] + corrected_keywords + product_brief + platform_profile + prompt_pack"
   },
@@ -619,7 +619,7 @@ function buildPromptPack() {
 
   const imagePrompt = [
     `角色：你是巴西电商视觉总监和葡语转化文案专家。`,
-    `模型优先级：默认第一优先级使用 ChatGPT 5.5 Pro 最高级模型（API 模型标识：gpt-5.5-pro）进行链接拆解、关键词判断、图片提示词和详情页生成；其他 API 仅作为备用或人工指定。`,
+    `模型优先级：默认第一优先级使用 ChatGPT 5.5 Pro 最高级模型（API 模型标识：gpt-5.5）进行链接拆解、关键词判断、图片提示词和详情页生成；其他 API 仅作为备用或人工指定。`,
     `目标：基于上传的 ${imageCount} 张产品参考图，生成符合 ${platform.label} 的产品图片方案。`,
     `产品：${productName}`,
     `巴西市场定位：重视价格感、耐用性、清晰规格、快速理解和真实使用场景。`,
@@ -636,7 +636,7 @@ function buildPromptPack() {
   ].join("\n");
 
   const detailPrompt = [
-    `模型优先级：默认第一优先级使用 ChatGPT 5.5 Pro 最高级模型（API 模型标识：gpt-5.5-pro）；其他 API 仅作为备用或人工指定。`,
+    `模型优先级：默认第一优先级使用 ChatGPT 5.5 Pro 最高级模型（API 模型标识：gpt-5.5）；其他 API 仅作为备用或人工指定。`,
     `请为 ${platform.label} 生成巴西葡萄牙语商品详情页。`,
     `语气：${platform.tone}`,
     `结构：${platform.detailShape.join(" / ")}`,
