@@ -1,0 +1,27 @@
+const { createToken, publicAccount, sha256 } = require("../_lib/auth");
+const { readJson, sendJson } = require("../_lib/http");
+const { filter, supabaseRequest } = require("../_lib/supabase");
+
+module.exports = async function handler(req, res) {
+  if (req.method !== "POST") return sendJson(res, 405, { error: "METHOD_NOT_ALLOWED" });
+
+  try {
+    const { username, password } = await readJson(req);
+    const rows = await supabaseRequest(`accounts?username=${filter(username || "")}&select=*`);
+    const account = rows[0];
+    const passwordHash = await sha256(password || "");
+
+    if (!account || account.password_hash !== passwordHash || account.status !== "active") {
+      return sendJson(res, 401, { error: "INVALID_CREDENTIALS", message: "账号或密码错误，或账号已暂停。" });
+    }
+
+    const token = await createToken(account.id);
+    return sendJson(res, 200, {
+      ok: true,
+      token,
+      account: publicAccount(account)
+    });
+  } catch (error) {
+    return sendJson(res, 500, { error: error.code || "LOGIN_FAILED", message: error.message });
+  }
+};

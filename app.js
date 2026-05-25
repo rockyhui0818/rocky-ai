@@ -191,6 +191,8 @@ const state = {
   latestPrompt: "",
   latestRemoteResult: null,
   latestRemoteStatus: "",
+  authToken: localStorage.getItem("commerceStudio.authToken") || "",
+  cloudMode: false,
   accounts: loadStoredJson("commerceStudio.accounts", defaultAccounts),
   usageLogs: loadStoredJson("commerceStudio.usageLogs", defaultUsageLogs),
   currentAccountId: localStorage.getItem("commerceStudio.sessionAccountId") || "",
@@ -250,7 +252,7 @@ function normalizeAccounts(accounts) {
       username: account.username || defaults?.username || account.id,
       password: account.password || defaults?.password || "123456",
       platforms: account.platforms?.length ? account.platforms : defaults?.platforms || ["amazon", "mercado", "all"],
-      models: ["openai"]
+      models: account.models?.length ? account.models : defaults?.models || ["openai"]
     };
   });
 }
@@ -267,11 +269,34 @@ function normalizeUsageLogs(logs) {
 function persistAccountState() {
   localStorage.setItem("commerceStudio.accounts", JSON.stringify(state.accounts));
   localStorage.setItem("commerceStudio.usageLogs", JSON.stringify(state.usageLogs));
+  if (state.authToken) {
+    localStorage.setItem("commerceStudio.authToken", state.authToken);
+  } else {
+    localStorage.removeItem("commerceStudio.authToken");
+  }
   if (state.currentAccountId) {
     localStorage.setItem("commerceStudio.sessionAccountId", state.currentAccountId);
   } else {
     localStorage.removeItem("commerceStudio.sessionAccountId");
   }
+}
+
+async function apiRequest(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {}),
+      ...(options.headers || {})
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.message || data.error || "API 请求失败");
+    error.payload = data;
+    throw error;
+  }
+  return data;
 }
 
 function getCurrentAccount() {
@@ -345,6 +370,68 @@ function authenticate(username, password) {
   return state.accounts.find(
     (account) => account.username === username && account.password === password && account.status === "active"
   );
+}
+
+async function authenticateRemote(username, password) {
+  const data = await apiRequest("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password })
+  });
+  state.authToken = data.token;
+  state.cloudMode = true;
+  upsertAccount(data.account);
+  state.currentAccountId = data.account.id;
+  await refreshCloudData();
+  persistAccountState();
+  return data.account;
+}
+
+async function refreshSessionFromCloud() {
+  if (!state.authToken) return false;
+  try {
+    const data = await apiRequest("/api/auth/session");
+    state.cloudMode = true;
+    upsertAccount(data.account);
+    state.currentAccountId = data.account.id;
+    await refreshCloudData();
+    persistAccountState();
+    return true;
+  } catch {
+    state.authToken = "";
+    state.cloudMode = false;
+    persistAccountState();
+    return false;
+  }
+}
+
+async function refreshCloudData() {
+  if (!state.authToken) return;
+  const account = getCurrentAccount();
+  const usageData = await apiRequest("/api/usage");
+  if (usageData.account) upsertAccount(usageData.account);
+  state.usageLogs = usageData.usageLogs || state.usageLogs;
+
+  if (account?.role === "owner") {
+    const accountData = await apiRequest("/api/admin/accounts");
+    state.accounts = accountData.accounts || state.accounts;
+  }
+  persistAccountState();
+}
+
+function upsertAccount(account) {
+  if (!account) return;
+  const index = state.accounts.findIndex((item) => item.id === account.id || item.username === account.username);
+  const normalized = {
+    ...account,
+    password: "",
+    platforms: account.platforms || ["amazon", "mercado", "all"],
+    models: account.models || ["openai"]
+  };
+  if (index >= 0) {
+    state.accounts[index] = { ...state.accounts[index], ...normalized };
+  } else {
+    state.accounts.push(normalized);
+  }
 }
 
 function parseProductUrl(rawUrl) {
@@ -696,7 +783,7 @@ function renderAccountControls(pack = buildPromptPack()) {
   els.sessionCard.innerHTML = `
     <b>${escapeHtml(currentAccount.name)}</b>
     <span>${escapeHtml(currentAccount.username)} · ${escapeHtml(roleLabel(currentAccount.role))}</span>
-    <span>${currentAccount.role === "owner" ? "全局管理权限" : "子账号隔离空间"}</span>
+    <span>${currentAccount.role === "owner" ? "全局管理权限" : "子账号隔离空间"} · ${state.cloudMode ? "云端同步" : "本地演示"}</span>
   `;
 
   els.accountSummary.innerHTML = `
@@ -990,9 +1077,17 @@ async function requestRemoteGeneration(pack) {
   const response = await fetch("/api/generate", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      ...(state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {})
     },
-    body: JSON.stringify(buildApiDraft(pack))
+    body: JSON.stringify({
+      ...buildApiDraft(pack),
+      platform_key: els.platform.value,
+      usage_estimate: {
+        units: estimateUsageUnits(pack),
+        tokens: estimateTokenUsage(pack)
+      }
+    })
   });
 
   const data = await response.json().catch(() => ({}));
@@ -1157,7 +1252,13 @@ els.generateBtn.addEventListener("click", async () => {
     const remoteData = await requestRemoteGeneration(pack);
     state.latestRemoteResult = remoteData.result || remoteData.rawText || remoteData;
     state.latestRemoteStatus = `真实 API 已返回，模型：${remoteData.model || pack.model.model}`;
-    recordUsageEvent(pack, getRemoteTokenUsage(remoteData));
+    if (remoteData.account) {
+      upsertAccount(remoteData.account);
+      state.currentAccountId = remoteData.account.id;
+      if (state.authToken) await refreshCloudData();
+    } else {
+      recordUsageEvent(pack, getRemoteTokenUsage(remoteData));
+    }
     activateTab("api");
   } catch (error) {
     state.latestRemoteResult = error.payload || { message: error.message };
@@ -1195,11 +1296,19 @@ els.tabs.forEach((tab) => {
   tab.addEventListener("click", () => activateTab(tab.dataset.tab));
 });
 
-els.loginForm.addEventListener("submit", (event) => {
+els.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const username = els.loginUsername.value.trim();
   const password = els.loginPassword.value;
-  const account = authenticate(username, password);
+  let account = null;
+  els.loginError.textContent = "正在登录...";
+
+  try {
+    account = await authenticateRemote(username, password);
+  } catch {
+    account = authenticate(username, password);
+    state.cloudMode = false;
+  }
 
   if (!account) {
     els.loginError.textContent = "账号或密码错误，或账号已被暂停。";
@@ -1224,12 +1333,14 @@ els.loginView.addEventListener("click", (event) => {
 
 els.logoutBtn.addEventListener("click", () => {
   state.currentAccountId = "";
+  state.authToken = "";
+  state.cloudMode = false;
   persistAccountState();
   activateTab("brief");
   renderSession();
 });
 
-els.adminOutput.addEventListener("click", (event) => {
+els.adminOutput.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-action]");
   if (!button) return;
   const action = button.dataset.action;
@@ -1247,10 +1358,17 @@ els.adminOutput.addEventListener("click", (event) => {
     const account = getAccountById(button.dataset.accountId);
     if (!account || account.role === "owner") return;
     account.status = account.status === "active" ? "paused" : "active";
+    if (state.cloudMode) {
+      await apiRequest("/api/admin/account", {
+        method: "PATCH",
+        body: JSON.stringify({ id: account.id, status: account.status })
+      });
+      await refreshCloudData();
+    }
   }
 
   if (action === "create-account") {
-    createSubAccountFromForm();
+    await createSubAccountFromForm();
   }
 
   if (action === "reset-accounts") {
@@ -1263,7 +1381,7 @@ els.adminOutput.addEventListener("click", (event) => {
   renderOutputs();
 });
 
-function createSubAccountFromForm() {
+async function createSubAccountFromForm() {
   const nameInput = document.querySelector("#newAccountName");
   const usernameInput = document.querySelector("#newAccountUsername");
   const passwordInput = document.querySelector("#newAccountPassword");
@@ -1279,7 +1397,7 @@ function createSubAccountFromForm() {
     return;
   }
 
-  state.accounts.push({
+  const newAccount = {
     id: `sub-${Date.now()}`,
     username,
     password,
@@ -1290,7 +1408,18 @@ function createSubAccountFromForm() {
     used: 0,
     platforms: role === "designer" ? ["amazon", "mercado", "all"] : ["amazon", "mercado", "tiktok", "shopee", "all"],
     models: ["openai"]
-  });
+  };
+
+  if (state.cloudMode) {
+    await apiRequest("/api/admin/accounts", {
+      method: "POST",
+      body: JSON.stringify(newAccount)
+    });
+    await refreshCloudData();
+    return;
+  }
+
+  state.accounts.push(newAccount);
 }
 
 function getVisibleUsageLogs() {
@@ -1318,4 +1447,9 @@ function maybeRecordEditEvent(element) {
   recordAuditEvent("edit", "修改商品输入");
 }
 
-renderSession();
+async function boot() {
+  await refreshSessionFromCloud();
+  renderSession();
+}
+
+boot();

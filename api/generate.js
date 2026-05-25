@@ -1,18 +1,6 @@
-function sendJson(res, statusCode, payload) {
-  res.statusCode = statusCode;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("Cache-Control", "no-store");
-  res.end(JSON.stringify(payload));
-}
-
-async function readJson(req) {
-  const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(chunk);
-  }
-  const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : {};
-}
+const { getAccountByToken, publicAccount } = require("./_lib/auth");
+const { getBearerToken, readJson, sendJson } = require("./_lib/http");
+const { filter, supabaseRequest } = require("./_lib/supabase");
 
 function extractText(data) {
   return data?.choices?.[0]?.message?.content || data?.output_text || data?.content?.[0]?.text || "";
@@ -75,6 +63,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const payload = await readJson(req);
+    const account = await getAccountByToken(getBearerToken(req)).catch(() => null);
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
@@ -108,10 +97,40 @@ module.exports = async function handler(req, res) {
       parsed = null;
     }
 
+    let updatedAccount = account;
+    if (account) {
+      const units = Number(payload?.usage_estimate?.units || 1);
+      const tokens = Number(data?.usage?.total_tokens || payload?.usage_estimate?.tokens || 0);
+      await supabaseRequest("usage_logs", {
+        method: "POST",
+        body: JSON.stringify({
+          account_id: account.id,
+          type: "generate",
+          action: payload?.product?.name ? `生成 ${payload.product.name}` : "生成商品方案",
+          platform: payload?.platform_key || payload?.platform || "all",
+          model: "openai",
+          units,
+          tokens,
+          success: true,
+          metadata: {
+            provider_model: model,
+            product: payload?.product,
+            usage: data.usage || null
+          }
+        })
+      });
+      const rows = await supabaseRequest(`accounts?id=${filter(account.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ used: Math.min(Number(account.quota || 0), Number(account.used || 0) + units) })
+      });
+      updatedAccount = rows[0] || account;
+    }
+
     return sendJson(res, 200, {
       ok: true,
       model,
       usage: data.usage || null,
+      account: publicAccount(updatedAccount),
       result: parsed,
       rawText: parsed ? "" : text
     });

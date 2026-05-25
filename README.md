@@ -27,10 +27,30 @@
 - `OPENAI_API_KEY`: 你的模型 API Key
 - `OPENAI_BASE_URL`: OpenAI 兼容接口地址，默认 `https://api.openai.com/v1`
 - `OPENAI_TEXT_MODEL`: 文本生成模型，默认 `gpt-5.5-pro`
+- `SUPABASE_URL`: Supabase Project URL
+- `SUPABASE_SERVICE_ROLE_KEY`: Supabase service_role key，仅放后端环境变量，不能暴露到前端
+- `SESSION_SECRET`: 任意长随机字符串，用于签发登录 token
 
 如果你使用的是第三方 OpenAI 兼容端口，只需要把 `OPENAI_BASE_URL` 改成你的 API Base URL，例如 `https://api.example.com/v1`。
 
 前端发送给 `/api/generate` 的内容包括：账号信息、平台、产品链接、关键词、卖点、图片文件元信息、图片提示词和详情页提示词。后端会返回结构化 JSON，并把真实 `usage.total_tokens` 记录到 Dashboard。
+
+## Supabase 设置
+
+1. 打开 Supabase 项目。
+2. 进入 SQL Editor。
+3. 复制并执行 `supabase/schema.sql`。
+4. 进入 Project Settings -> API，复制 Project URL 到 `SUPABASE_URL`。
+5. 复制 `service_role` key 到 `SUPABASE_SERVICE_ROLE_KEY`。注意不要使用 `anon public` key。
+
+默认会创建 4 个账号：
+
+- 主管理员：`admin` / `admin123`
+- 设计子账号：`creative-a` / `design123`
+- 运营子账号：`ops-b` / `ops123`
+- 审核子账号：`review-c` / `review123`
+
+配置 Supabase 后，其他电脑打开网站并用账号密码登录，会读取同一套云端账号、权限和用量记录。
 
 ## 公网部署
 
