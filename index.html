@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VISION BRZAZIL 电商视觉生成器</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <section class="login-view" id="loginView" aria-label="登录">
+      <form class="login-panel" id="loginForm">
+        <p class="eyebrow">VISION BRZAZIL</p>
+        <h1>账号登录</h1>
+        <p class="login-copy">主管理员统一分配子账号、平台权限、模型权限和额度；子账号登录后只能操作自己的任务与用量。</p>
+        <label>
+          账号
+          <input id="loginUsername" type="text" autocomplete="username" placeholder="admin" />
+        </label>
+        <label>
+          密码
+          <input id="loginPassword" type="password" autocomplete="current-password" placeholder="admin123" />
+        </label>
+        <button class="primary-btn" type="submit">登录</button>
+        <p class="login-error" id="loginError"></p>
+        <div class="demo-accounts">
+          <b>演示账号</b>
+          <button type="button" data-demo-login="admin">admin / admin123</button>
+          <button type="button" data-demo-login="creative-a">creative-a / design123</button>
+          <button type="button" data-demo-login="ops-b">ops-b / ops123</button>
+        </div>
+      </form>
+    </section>
+
+    <main class="app-shell is-hidden" id="appShell">
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">VISION BRZAZIL</p>
+            <h1>巴西电商视觉与详情页生成器</h1>
+          </div>
+          <div class="header-actions">
+            <div class="status-pill" id="marketStatus">VISION BR ready</div>
+            <button class="ghost-btn compact-btn" id="logoutBtn" type="button">退出</button>
+          </div>
+        </header>
+
+        <section class="account-bar" aria-label="账号控制">
+          <div class="session-card" id="sessionCard"></div>
+          <div class="account-summary" id="accountSummary"></div>
+        </section>
+
+        <section class="input-panel" aria-label="输入区">
+          <div class="upload-zone" id="uploadZone">
+            <input id="imageInput" type="file" accept="image/*" multiple />
+            <div class="upload-copy">
+              <span class="upload-icon">+</span>
+              <strong>上传产品图片</strong>
+              <span>支持多张产品图，会生成主图、场景图、信息图和详情页建议。</span>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <label>
+              产品名称
+              <input id="productName" type="text" placeholder="例如：便携式榨汁杯" />
+            </label>
+            <label>
+              目标平台
+              <select id="platform">
+                <option value="amazon">Amazon Brasil</option>
+                <option value="mercado">Mercado Livre</option>
+                <option value="tiktok">TikTok Shop</option>
+                <option value="shopee">Shopee Brasil</option>
+                <option value="all">四平台通用方案</option>
+              </select>
+            </label>
+            <label>
+              模型供应商
+              <select id="modelProvider">
+                <option value="openai">ChatGPT 5.5 Pro 最高级模型</option>
+                <option value="gemini">Google Gemini</option>
+                <option value="claude">Claude + 外部生图</option>
+                <option value="local">本地模型 / ComfyUI</option>
+                <option value="manual">仅生成提示词</option>
+              </select>
+            </label>
+          </div>
+
+          <label>
+            多条产品链接
+            <textarea id="productUrl" rows="5" placeholder="每行一条链接，可混合美国竞品链接和巴西本地链接&#10;https://www.amazon.com/...&#10;https://www.amazon.com.br/...&#10;https://produto.mercadolivre.com.br/..."></textarea>
+          </label>
+
+          <label>
+            卖点文字描述
+            <textarea id="sellingPoints" rows="6" placeholder="写入产品核心卖点、材质、尺寸、适用人群、差异化优势、禁用词等。"></textarea>
+          </label>
+
+          <label>
+            人工修正关键词
+            <textarea id="manualKeywords" rows="4" placeholder="可手动修正最终关键词，逗号或换行分隔。填写后会覆盖自动拆解关键词，用于链接分析、图片生成和详情页。"></textarea>
+          </label>
+
+          <div class="control-row">
+            <button id="generateBtn" class="primary-btn" type="button">生成方案</button>
+            <button id="copyBtn" class="ghost-btn" type="button">复制提示词</button>
+            <button id="resetBtn" class="ghost-btn" type="button">清空</button>
+          </div>
+        </section>
+
+        <section class="preview-strip" id="previewStrip" aria-label="图片预览"></section>
+      </section>
+
+      <aside class="output-panel" aria-label="输出区">
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="brief" type="button">链接拆解</button>
+          <button class="tab" data-tab="image" type="button">图片提示词</button>
+          <button class="tab" data-tab="detail" type="button">详情页</button>
+          <button class="tab" data-tab="api" type="button">模型接口</button>
+          <button class="tab" data-tab="admin" type="button" id="adminTab">Dashboard</button>
+        </div>
+
+        <section class="output active" id="briefOutput"></section>
+        <section class="output" id="imageOutput"></section>
+        <section class="output" id="detailOutput"></section>
+        <section class="output" id="apiOutput"></section>
+        <section class="output" id="adminOutput"></section>
+      </aside>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

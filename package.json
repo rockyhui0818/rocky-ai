@@ -1,0 +1,10 @@
+{
+  "name": "vision-brzazil-commerce-studio",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "build": "node --check app.js"
+  },
+  "devDependencies": {}
+}
