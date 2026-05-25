@@ -1,27 +1,46 @@
-const { getAccountByToken, publicAccount } = require("../_lib/auth");
+const { getAccountByToken, publicAccount, sha256 } = require("../_lib/auth");
 const { getBearerToken, readJson, sendJson } = require("../_lib/http");
 const { filter, supabaseRequest } = require("../_lib/supabase");
 
 module.exports = async function handler(req, res) {
-  if (req.method !== "PATCH") return sendJson(res, 405, { error: "METHOD_NOT_ALLOWED" });
-
   try {
     const currentAccount = await getAccountByToken(getBearerToken(req));
     if (!currentAccount || currentAccount.role !== "owner") {
-      return sendJson(res, 403, { error: "FORBIDDEN", message: "仅主管理员可修改子账号。" });
+      return sendJson(res, 403, { error: "FORBIDDEN", message: "仅主管理员可管理账号。" });
     }
 
-    const { id, status, quota, platforms, models, name } = await readJson(req);
-    if (!id || id === currentAccount.id) return sendJson(res, 400, { error: "INVALID_ACCOUNT_ID" });
+    if (req.method === "DELETE") {
+      const { id } = await readJson(req);
+      if (!id || id === currentAccount.id) {
+        return sendJson(res, 400, { error: "INVALID_ACCOUNT_ID", message: "不能删除主管理员账号。" });
+      }
+      await supabaseRequest(`accounts?id=${filter(id)}&role=neq.owner`, {
+        method: "DELETE",
+        headers: { Prefer: "return=minimal" }
+      });
+      return sendJson(res, 200, { ok: true, deletedId: id });
+    }
+
+    if (req.method !== "PATCH") return sendJson(res, 405, { error: "METHOD_NOT_ALLOWED" });
+
+    const body = await readJson(req);
+    const targetId = body.id;
+    if (!targetId) return sendJson(res, 400, { error: "INVALID_ACCOUNT_ID" });
 
     const patch = {};
-    if (status) patch.status = status;
-    if (quota !== undefined) patch.quota = Math.max(10, Number(quota));
-    if (platforms) patch.platforms = platforms;
-    if (models) patch.models = models;
-    if (name) patch.name = name;
+    if (body.status && targetId !== currentAccount.id) patch.status = body.status;
+    if (body.quota !== undefined && targetId !== currentAccount.id) patch.quota = Math.max(10, Number(body.quota));
+    if (body.platforms && targetId !== currentAccount.id) patch.platforms = body.platforms;
+    if (body.models && targetId !== currentAccount.id) patch.models = body.models;
+    if (body.name) patch.name = body.name;
+    if (body.username) patch.username = body.username;
+    if (body.password) patch.password_hash = await sha256(body.password);
 
-    const rows = await supabaseRequest(`accounts?id=${filter(id)}`, {
+    if (!Object.keys(patch).length) {
+      return sendJson(res, 400, { error: "EMPTY_PATCH", message: "没有可更新的字段。" });
+    }
+
+    const rows = await supabaseRequest(`accounts?id=${filter(targetId)}`, {
       method: "PATCH",
       body: JSON.stringify(patch)
     });

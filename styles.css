@@ -596,7 +596,7 @@ button:disabled {
 
 .account-row {
   display: grid;
-  grid-template-columns: minmax(130px, 0.9fr) minmax(84px, 0.48fr) auto minmax(160px, 1fr) minmax(120px, 0.9fr) auto auto;
+  grid-template-columns: minmax(130px, 0.9fr) minmax(84px, 0.48fr) auto minmax(160px, 1fr) minmax(120px, 0.9fr) auto auto auto;
   gap: 10px;
   align-items: center;
   padding: 12px;
@@ -671,6 +671,12 @@ mark {
   padding: 0 10px;
   border-color: var(--line);
   background: transparent;
+}
+
+.danger-btn {
+  color: #b42318;
+  border-color: rgba(180, 35, 24, 0.28);
+  background: rgba(180, 35, 24, 0.06);
 }
 
 .usage-item {

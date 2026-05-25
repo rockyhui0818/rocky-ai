@@ -852,6 +852,7 @@ function renderAdminOutput(pack = buildPromptPack()) {
       <div class="kpi"><b>${formatNumber(usageTotals.editCount)}</b><span>修改次数</span></div>
       <div class="kpi"><b>${totals.risky}</b><span>高用量账号</span></div>
     </div>
+    ${renderOwnerSettingsPanel(currentAccount)}
     ${renderCreateAccountPanel(adminControls)}
     <h3>账号列表</h3>
     <div class="account-table">
@@ -866,6 +867,23 @@ function renderAdminOutput(pack = buildPromptPack()) {
     </div>
     <h3>后端权限模型草案</h3>
     <div class="data-block">${escapeHtml(JSON.stringify(buildAdminApiDraft(pack), null, 2))}</div>
+  `;
+}
+
+function renderOwnerSettingsPanel(account) {
+  return `
+    <section class="admin-create-panel">
+      <div>
+        <h3>主账号设置</h3>
+        <p>主管理员可修改自己的显示名称、登录账号和密码。密码留空则不修改。</p>
+      </div>
+      <div class="create-account-grid">
+        <input id="ownerAccountName" type="text" placeholder="主账号名称" value="${escapeHtml(account.name)}" />
+        <input id="ownerAccountUsername" type="text" placeholder="主账号登录账号" value="${escapeHtml(account.username)}" />
+        <input id="ownerAccountPassword" type="password" placeholder="新密码，留空不修改" autocomplete="new-password" />
+        <button class="primary-btn" data-action="update-owner-account" type="button">保存主账号</button>
+      </div>
+    </section>
   `;
 }
 
@@ -920,6 +938,7 @@ function renderAccountRow(account, adminControls) {
       <button class="tiny-btn" data-action="toggle-account" data-account-id="${account.id}" ${disabled} type="button">
         ${account.role === "owner" ? "锁定" : account.status === "active" ? "暂停" : "启用"}
       </button>
+      <button class="tiny-btn danger-btn" data-action="delete-account" data-account-id="${account.id}" ${disabled} type="button">删除</button>
     </article>
   `;
 }
@@ -1345,6 +1364,14 @@ els.adminOutput.addEventListener("click", async (event) => {
     }
   }
 
+  if (action === "delete-account") {
+    await deleteSubAccount(button.dataset.accountId);
+  }
+
+  if (action === "update-owner-account") {
+    await updateOwnerAccountFromForm();
+  }
+
   if (action === "create-account") {
     await createSubAccountFromForm();
   }
@@ -1398,6 +1425,60 @@ async function createSubAccountFromForm() {
   }
 
   state.accounts.push(newAccount);
+}
+
+async function updateOwnerAccountFromForm() {
+  const account = getCurrentAccount();
+  if (!account) return;
+  const name = document.querySelector("#ownerAccountName")?.value.trim();
+  const username = document.querySelector("#ownerAccountUsername")?.value.trim();
+  const password = document.querySelector("#ownerAccountPassword")?.value.trim();
+  const patch = {
+    id: account.id,
+    ...(name ? { name } : {}),
+    ...(username ? { username } : {}),
+    ...(password ? { password } : {})
+  };
+
+  if (state.cloudMode) {
+    const data = await apiRequest("/api/admin/account", {
+      method: "PATCH",
+      body: JSON.stringify(patch)
+    });
+    upsertAccount(data.account);
+    state.currentAccountId = data.account.id;
+    const passwordInput = document.querySelector("#ownerAccountPassword");
+    if (passwordInput) passwordInput.value = "";
+    await refreshCloudData();
+    return;
+  }
+
+  account.name = name || account.name;
+  account.username = username || account.username;
+  const passwordInput = document.querySelector("#ownerAccountPassword");
+  if (passwordInput) passwordInput.value = "";
+}
+
+async function deleteSubAccount(accountId) {
+  const account = getAccountById(accountId);
+  if (!account || account.role === "owner") return;
+  const confirmed = window.confirm(`确认删除子账号「${account.name}」？该账号的用量记录也会被删除。`);
+  if (!confirmed) return;
+
+  if (state.cloudMode) {
+    await apiRequest("/api/admin/account", {
+      method: "DELETE",
+      body: JSON.stringify({ id: accountId })
+    });
+    await refreshCloudData();
+  } else {
+    state.accounts = state.accounts.filter((item) => item.id !== accountId);
+    state.usageLogs = state.usageLogs.filter((log) => log.accountId !== accountId);
+  }
+
+  if (state.selectedDetailAccountId === accountId) {
+    state.selectedDetailAccountId = "";
+  }
 }
 
 function getVisibleUsageLogs() {
