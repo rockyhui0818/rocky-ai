@@ -43,12 +43,7 @@
 4. 进入 Project Settings -> API，复制 Project URL 到 `SUPABASE_URL`。
 5. 复制 `service_role` key 到 `SUPABASE_SERVICE_ROLE_KEY`。注意不要使用 `anon public` key。
 
-默认会创建 4 个账号：
-
-- 主管理员：`admin` / `admin123`
-- 设计子账号：`creative-a` / `design123`
-- 运营子账号：`ops-b` / `ops123`
-- 审核子账号：`review-c` / `review123`
+`supabase/schema.sql` 会创建 1 个主管理员账号和 3 个子账号用于初始化。正式上线后请立即在 Supabase 中修改初始密码哈希，或通过后台创建新的管理员账号后删除初始化账号。
 
 配置 Supabase 后，其他电脑打开网站并用账号密码登录，会读取同一套云端账号、权限和用量记录。
 
@@ -78,13 +73,6 @@ GitHub Pages 设置：
 当前版本的登录、子账号和用量记录仍使用浏览器 `localStorage` 模拟。公网演示可以用，但正式多电脑使用需要后端数据库和真实鉴权，否则每台电脑的数据不会共享。
 
 默认内置 4 个账号：主管理员、设计子账号、运营子账号、审核子账号。当前版本使用 `localStorage` 模拟登录、权限和用量记录，后续接后端后应替换为真实鉴权、密码哈希、服务端 Session/JWT 和数据库隔离。
-
-演示登录：
-
-- 主管理员：`admin` / `admin123`
-- 设计子账号：`creative-a` / `design123`
-- 运营子账号：`ops-b` / `ops123`
-- 审核子账号：`review-c` / `review123`
 
 主管理员可以进入 Dashboard 查看全局账号、用量、权限和最近记录，并创建、暂停、启用子账号。子账号登录后只进入自己的生成工作台，只能使用被分配的平台、模型和额度。
 

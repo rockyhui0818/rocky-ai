@@ -93,7 +93,6 @@ const defaultAccounts = [
   {
     id: "admin",
     username: "admin",
-    password: "admin123",
     name: "主管理员",
     role: "owner",
     status: "active",
@@ -105,7 +104,6 @@ const defaultAccounts = [
   {
     id: "creative-a",
     username: "creative-a",
-    password: "design123",
     name: "设计子账号 A",
     role: "designer",
     status: "active",
@@ -117,7 +115,6 @@ const defaultAccounts = [
   {
     id: "ops-b",
     username: "ops-b",
-    password: "ops123",
     name: "运营子账号 B",
     role: "operator",
     status: "active",
@@ -129,7 +126,6 @@ const defaultAccounts = [
   {
     id: "review-c",
     username: "review-c",
-    password: "review123",
     name: "审核子账号 C",
     role: "reviewer",
     status: "paused",
@@ -178,13 +174,6 @@ const defaultUsageLogs = [
     createdAt: "2026-05-25 10:04"
   }
 ];
-
-const demoCredentials = {
-  admin: { username: "admin", password: "admin123" },
-  "creative-a": { username: "creative-a", password: "design123" },
-  "ops-b": { username: "ops-b", password: "ops123" },
-  "review-c": { username: "review-c", password: "review123" }
-};
 
 const state = {
   images: [],
@@ -250,7 +239,7 @@ function normalizeAccounts(accounts) {
     return {
       ...account,
       username: account.username || defaults?.username || account.id,
-      password: account.password || defaults?.password || "123456",
+      password: "",
       platforms: account.platforms?.length ? account.platforms : defaults?.platforms || ["amazon", "mercado", "all"],
       models: account.models?.length ? account.models : defaults?.models || ["openai"]
     };
@@ -367,9 +356,7 @@ function renderSession() {
 }
 
 function authenticate(username, password) {
-  return state.accounts.find(
-    (account) => account.username === username && account.password === password && account.status === "active"
-  );
+  return null;
 }
 
 async function authenticateRemote(username, password) {
@@ -1320,15 +1307,6 @@ els.loginForm.addEventListener("submit", async (event) => {
   els.loginPassword.value = "";
   persistAccountState();
   renderSession();
-});
-
-els.loginView.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-demo-login]");
-  if (!button) return;
-  const credential = demoCredentials[button.dataset.demoLogin];
-  if (!credential) return;
-  els.loginUsername.value = credential.username;
-  els.loginPassword.value = credential.password;
 });
 
 els.logoutBtn.addEventListener("click", () => {
