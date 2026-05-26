@@ -180,6 +180,8 @@ const state = {
   latestPrompt: "",
   latestRemoteResult: null,
   latestRemoteStatus: "",
+  latestImageResult: null,
+  latestImageStatus: "",
   authToken: localStorage.getItem("commerceStudio.authToken") || "",
   cloudMode: false,
   accounts: loadStoredJson("commerceStudio.accounts", defaultAccounts),
@@ -213,6 +215,8 @@ const els = {
   sellingPoints: document.querySelector("#sellingPoints"),
   manualKeywords: document.querySelector("#manualKeywords"),
   generateBtn: document.querySelector("#generateBtn"),
+  saveDraftBtn: document.querySelector("#saveDraftBtn"),
+  loadDraftBtn: document.querySelector("#loadDraftBtn"),
   copyBtn: document.querySelector("#copyBtn"),
   resetBtn: document.querySelector("#resetBtn"),
   briefOutput: document.querySelector("#briefOutput"),
@@ -717,6 +721,7 @@ function renderOutputs() {
 
   els.imageOutput.innerHTML = `
     <h2>图片生成提示词</h2>
+    ${renderImageResult()}
     <div class="prompt-block">${escapeHtml(pack.imagePrompt)}</div>
     <h3>建议出图队列</h3>
     <ol>
@@ -729,7 +734,9 @@ function renderOutputs() {
   `;
 
   els.detailOutput.innerHTML = `
-    <h2>详情页生成提示词</h2>
+    <h2>详情页</h2>
+    ${renderGeneratedDetail()}
+    <h3>详情页生成提示词</h3>
     <div class="prompt-block">${escapeHtml(pack.detailPrompt)}</div>
     <h3>葡语详情页骨架</h3>
     ${renderDetailSkeleton(pack)}
@@ -749,6 +756,52 @@ function renderOutputs() {
   `;
 
   renderAdminOutput(pack);
+}
+
+function renderImageResult() {
+  if (!state.latestImageStatus && !state.latestImageResult) return "";
+  const image = state.latestImageResult?.b64_json
+    ? `data:image/png;base64,${state.latestImageResult.b64_json}`
+    : state.latestImageResult?.url || "";
+  return `
+    <section class="generated-section">
+      <h3>真实生成图片</h3>
+      <p>${escapeHtml(state.latestImageStatus || "图片 API 已返回")}</p>
+      ${image ? `<figure class="generated-image-card"><img src="${image}" alt="AI generated product visual" /></figure>` : ""}
+      ${state.latestImageResult?.revised_prompt ? `<div class="prompt-block">${escapeHtml(state.latestImageResult.revised_prompt)}</div>` : ""}
+    </section>
+  `;
+}
+
+function renderGeneratedDetail() {
+  const detail = state.latestRemoteResult?.detail_page;
+  if (!detail) {
+    return `<p>点击“生成方案”后，这里会显示模型返回的真实详情页内容；图片会显示在“图片提示词”标签页顶部。</p>`;
+  }
+  return `
+    <section class="generated-section">
+      <h3>真实生成详情页</h3>
+      <div class="detail-output-card">
+        ${renderDetailValue(detail)}
+      </div>
+    </section>
+  `;
+}
+
+function renderDetailValue(value) {
+  if (Array.isArray(value)) {
+    return `<ul>${value.map((item) => `<li>${renderDetailValue(item)}</li>`).join("")}</ul>`;
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, item]) => `<div class="detail-field"><b>${escapeHtml(formatDetailKey(key))}</b>${renderDetailValue(item)}</div>`)
+      .join("");
+  }
+  return `<p>${escapeHtml(value || "")}</p>`;
+}
+
+function formatDetailKey(key) {
+  return String(key).replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function renderRemoteResult() {
@@ -1109,6 +1162,18 @@ function getRemoteTokenUsage(remoteData) {
   return Number(remoteData?.usage?.total_tokens || remoteData?.usage?.totalTokens || 0);
 }
 
+async function requestRemoteImage(pack) {
+  return apiRequest("/api/image", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: pack.imagePrompt,
+      platform: els.platform.value,
+      size: "1024x1024",
+      units: 3
+    })
+  });
+}
+
 function buildAdminApiDraft(pack) {
   const account = getCurrentAccount();
   if (!account) return {};
@@ -1252,12 +1317,17 @@ els.generateBtn.addEventListener("click", async () => {
   const pack = buildPromptPack();
   const originalText = els.generateBtn.textContent;
   els.generateBtn.disabled = true;
-  els.generateBtn.textContent = "正在调用 API...";
+  els.generateBtn.textContent = "正在生成详情页和图片...";
 
   try {
-    const remoteData = await requestRemoteGeneration(pack);
+    const [remoteData, imageData] = await Promise.all([
+      requestRemoteGeneration(pack),
+      requestRemoteImage(pack)
+    ]);
     state.latestRemoteResult = remoteData.result || remoteData.rawText || remoteData;
     state.latestRemoteStatus = `真实 API 已返回，模型：${remoteData.model || pack.model.model}`;
+    state.latestImageResult = imageData.image || imageData;
+    state.latestImageStatus = `真实图片已返回，模型：${imageData.model || "gpt-image-2"}`;
     if (remoteData.account) {
       upsertAccount(remoteData.account);
       state.currentAccountId = remoteData.account.id;
@@ -1265,10 +1335,12 @@ els.generateBtn.addEventListener("click", async () => {
     } else {
       recordUsageEvent(pack, getRemoteTokenUsage(remoteData));
     }
-    activateTab("api");
+    activateTab("image");
   } catch (error) {
     state.latestRemoteResult = error.payload || { message: error.message };
-    state.latestRemoteStatus = "未连接到后端 API，已回退为本地提示词生成模式。";
+    state.latestRemoteStatus = "生成接口调用失败，已回退为本地提示词生成模式。";
+    state.latestImageResult = error.payload || { message: error.message };
+    state.latestImageStatus = "图片生成失败，请检查 API 配置或稍后重试。";
     recordUsageEvent(pack);
     activateTab("image");
   } finally {
@@ -1288,11 +1360,24 @@ els.copyBtn.addEventListener("click", async () => {
   }, 1200);
 });
 
+els.saveDraftBtn.addEventListener("click", () => {
+  saveDraft();
+});
+
+els.loadDraftBtn.addEventListener("click", () => {
+  loadDraft();
+});
+
 els.resetBtn.addEventListener("click", () => {
   els.productUrl.value = "";
   els.productName.value = "";
   els.sellingPoints.value = "";
+  els.manualKeywords.value = "";
   els.imageInput.value = "";
+  state.latestRemoteResult = null;
+  state.latestRemoteStatus = "";
+  state.latestImageResult = null;
+  state.latestImageStatus = "";
   renderPreviews([]);
   renderOutputs();
   activateTab("brief");
@@ -1481,6 +1566,57 @@ async function deleteSubAccount(accountId) {
   }
 }
 
+function draftKey() {
+  const account = getCurrentAccount();
+  return `commerceStudio.draft.${account?.id || "guest"}`;
+}
+
+function collectDraft() {
+  return {
+    productName: els.productName.value,
+    platform: els.platform.value,
+    modelProvider: els.modelProvider.value,
+    productUrl: els.productUrl.value,
+    sellingPoints: els.sellingPoints.value,
+    manualKeywords: els.manualKeywords.value,
+    savedAt: new Date().toISOString()
+  };
+}
+
+function saveDraft() {
+  if (!getCurrentAccount()) return;
+  localStorage.setItem(draftKey(), JSON.stringify(collectDraft()));
+  els.saveDraftBtn.textContent = "草稿已保存";
+  setTimeout(() => {
+    els.saveDraftBtn.textContent = "保存草稿";
+  }, 1400);
+}
+
+function loadDraft() {
+  if (!getCurrentAccount()) return;
+  const raw = localStorage.getItem(draftKey());
+  if (!raw) {
+    els.loadDraftBtn.textContent = "暂无草稿";
+    setTimeout(() => {
+      els.loadDraftBtn.textContent = "载入草稿";
+    }, 1400);
+    return;
+  }
+  const draft = JSON.parse(raw);
+  els.productName.value = draft.productName || "";
+  els.platform.value = draft.platform || "amazon";
+  els.modelProvider.value = draft.modelProvider || "openai";
+  els.productUrl.value = draft.productUrl || "";
+  els.sellingPoints.value = draft.sellingPoints || "";
+  els.manualKeywords.value = draft.manualKeywords || "";
+  renderOutputs();
+  activateTab("brief");
+  els.loadDraftBtn.textContent = "草稿已载入";
+  setTimeout(() => {
+    els.loadDraftBtn.textContent = "载入草稿";
+  }, 1400);
+}
+
 function getVisibleUsageLogs() {
   const account = getCurrentAccount();
   if (!account) return [];
@@ -1489,7 +1625,7 @@ function getVisibleUsageLogs() {
 }
 
 ["input", "change"].forEach((eventName) => {
-  [els.productUrl, els.productName, els.platform, els.modelProvider, els.sellingPoints].forEach((element) => {
+  [els.productUrl, els.productName, els.platform, els.modelProvider, els.sellingPoints, els.manualKeywords].forEach((element) => {
     element.addEventListener(eventName, () => {
       renderOutputs();
       maybeRecordEditEvent(element);
