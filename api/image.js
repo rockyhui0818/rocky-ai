@@ -112,6 +112,7 @@ module.exports = async function handler(req, res) {
       images.push({
         type: item.type || "image",
         label: item.label || item.type || "图片",
+        targetSpec: item.targetSpec || null,
         prompt: finalPrompt,
         ...firstImage(result.data)
       });

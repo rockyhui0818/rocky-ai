@@ -465,6 +465,19 @@ button:disabled {
   margin-bottom: 8px;
 }
 
+.image-spec-list {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 10px;
+}
+
+.image-spec-list span {
+  display: block;
+  color: #5a4a68;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .generated-image-card img {
   display: block;
   width: 100%;

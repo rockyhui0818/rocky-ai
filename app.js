@@ -51,6 +51,109 @@ const platformProfiles = {
   }
 };
 
+const imageSizeProfiles = {
+  amazon: {
+    label: "Amazon Brasil",
+    apiSize: "1024x1024",
+    defaultSpec: {
+      canvasLabel: "Amazon 商品图库方图",
+      targetRatio: "1:1",
+      recommendedPixels: "2000x2000 px",
+      safeArea: "产品主体占画面 85% 以上，边缘保留少量安全留白。",
+      platformRules: "主图纯白背景 RGB 255/255/255；无文字、徽章、水印、边框或无关道具；长边至少 1000 px 以支持缩放。",
+      exportNote: "当前 API 输出 1024x1024 高清 PNG，可作为预览或继续放大到 2000x2000 后上传。"
+    },
+    detailSpec: {
+      canvasLabel: "Amazon A+ 详情页横幅模块",
+      targetRatio: "97:60",
+      recommendedPixels: "970x600 px（建议源文件 1940x1200）",
+      safeArea: "核心产品和文字放在中间 80% 安全区，避免移动端裁切。",
+      platformRules: "适合 A+ Header/Single Image 模块；文字少而大，不放价格、折扣、夸张承诺或平台 Logo。",
+      exportNote: "API 先生成方图构图稿，设计时预留 970x600 横幅裁切区，后续可裁切为 A+ 模块尺寸。"
+    }
+  },
+  mercado: {
+    label: "Mercado Livre",
+    apiSize: "1024x1024",
+    defaultSpec: {
+      canvasLabel: "Mercado Livre 商品图",
+      targetRatio: "1:1",
+      recommendedPixels: "1200x1200 px",
+      safeArea: "产品居中，占画面约 90%-95%，不要贴边或被裁切。",
+      platformRules: "JPG/PNG，RGB，图片不超过 10MB；干净白底优先，避免水印、促销字、过度拼贴。",
+      exportNote: "当前 API 输出 1024x1024，符合方图方向；上架前建议放大/导出为 1200x1200。"
+    },
+    detailSpec: {
+      canvasLabel: "Mercado Livre 详情图模块",
+      targetRatio: "1:1",
+      recommendedPixels: "1200x1200 px",
+      safeArea: "移动端优先，标题和葡语短句保持大字号，四周留 8%-10% 安全边距。",
+      platformRules: "用于规格、包装清单、使用步骤和 FAQ 图；强调真实产品、发货/保障信息，不做虚假承诺。",
+      exportNote: "按 1200x1200 方图设计，适合商品图片轮播和详情说明复用。"
+    }
+  },
+  tiktok: {
+    label: "TikTok Shop",
+    apiSize: "1024x1024",
+    defaultSpec: {
+      canvasLabel: "TikTok Shop 商品方图",
+      targetRatio: "1:1",
+      recommendedPixels: "1200x1200 px",
+      safeArea: "产品居中，首图产品占 80%-90%，移动端缩略图也能看清。",
+      platformRules: "商品图至少 600x600；最多 9 张方图；主图白底且展示正面实物；避免文字、边框、水印或遮挡产品。",
+      exportNote: "当前 API 输出 1024x1024，适合 TikTok Shop 移动端预览；上架前可导出 1200x1200。"
+    },
+    detailSpec: {
+      canvasLabel: "TikTok Shop 移动详情图",
+      targetRatio: "1:1",
+      recommendedPixels: "1200x1200 px",
+      safeArea: "以手机瀑布流阅读为主，文字控制在 3-5 个短词组，按钮/标签不要贴边。",
+      platformRules: "副图可展示细节、使用场景、尺寸和配件，但必须准确代表实际售卖商品。",
+      exportNote: "保持方图，方便在商品轮播、直播商品卡和短视频封面中复用。"
+    }
+  },
+  shopee: {
+    label: "Shopee Brasil",
+    apiSize: "1024x1024",
+    defaultSpec: {
+      canvasLabel: "Shopee 商品方图",
+      targetRatio: "1:1",
+      recommendedPixels: "1024x1024 px 或更高",
+      safeArea: "产品完整入画，主图产品至少占 60%，副图信息区保留清晰留白。",
+      platformRules: "高分辨率、方图 1:1；白底和良好光线优先；避免水印、拼贴、边框、模糊和无关物体。",
+      exportNote: "当前 API 输出 1024x1024，直接匹配 Shopee 推荐分辨率。"
+    },
+    detailSpec: {
+      canvasLabel: "Shopee 移动端详情图",
+      targetRatio: "1:1",
+      recommendedPixels: "1024x1024 px 或更高",
+      safeArea: "手机端阅读，卖点图标和文字保持大字号，四周留 8%-10% 安全边距。",
+      platformRules: "适合尺寸、材质、套装内容、使用步骤和售后信息；每张图只讲一个主题。",
+      exportNote: "方图详情模块可直接用于 Shopee 商品图片和移动端描述。"
+    }
+  },
+  all: {
+    label: "四平台通用",
+    apiSize: "1024x1024",
+    defaultSpec: {
+      canvasLabel: "跨平台通用主图",
+      targetRatio: "1:1",
+      recommendedPixels: "2000x2000 px 母版",
+      safeArea: "产品主体居中，按 Amazon 最严格主图标准预留安全区。",
+      platformRules: "用 Amazon 白底主图作为通用母版，再按 Mercado Livre 1200、TikTok 1200、Shopee 1024 导出。",
+      exportNote: "当前 API 输出 1024x1024，后续可作为跨平台母版继续放大和裁切。"
+    },
+    detailSpec: {
+      canvasLabel: "跨平台详情页模块",
+      targetRatio: "1:1 + Amazon 97:60 安全裁切",
+      recommendedPixels: "2000x2000 母版；Amazon A+ 裁切 970x600",
+      safeArea: "核心产品和文字放在中心 80%，确保方图与 Amazon 横幅裁切都可用。",
+      platformRules: "一张图只表达一个卖点，葡语短句移动端可读，不出现虚假折扣、平台 Logo 或违规承诺。",
+      exportNote: "先生成方图详情母版；Amazon A+ 需要从中心安全区裁切为 970x600。"
+    }
+  }
+};
+
 const modelProfiles = {
   openai: {
     label: "ChatGPT 5.5 Pro 最高级模型",
@@ -770,10 +873,13 @@ function getGeneratedImageItems() {
 function renderImageResult() {
   if (!state.latestImageStatus && !state.latestImageResult) return "";
   const imageItems = getGeneratedImageItems();
+  const sizeSummary = imageItems.some((item) => item.targetSpec?.recommendedPixels)
+    ? "每张图片下方已标注对应平台推荐尺寸"
+    : "每张图片均为独立高清 1024x1024 PNG";
   return `
     <section class="generated-section">
       <h3>真实生成图片</h3>
-      <p>${escapeHtml(state.latestImageStatus || "图片 API 已返回")} · 每张图片均为独立高清 1024x1024 PNG</p>
+      <p>${escapeHtml(state.latestImageStatus || "图片 API 已返回")} · ${escapeHtml(sizeSummary)}</p>
       ${imageItems.length ? `<div class="generated-image-grid">${imageItems.map(renderGeneratedImageItem).join("")}</div>` : ""}
       ${!imageItems.length && state.latestImageResult ? `<div class="data-block">${escapeHtml(JSON.stringify(state.latestImageResult, null, 2))}</div>` : ""}
       ${state.latestImageResult?.revised_prompt ? `<div class="prompt-block">${escapeHtml(state.latestImageResult.revised_prompt)}</div>` : ""}
@@ -789,7 +895,7 @@ function renderDetailImages() {
   return `
     <section class="generated-section">
       <h3>详情页生成图片</h3>
-      <p>以下为独立详情页模块图，每张均可单独下载。</p>
+      <p>以下为独立详情页模块图，每张均可单独下载，并标注对应平台推荐尺寸。</p>
       <div class="generated-image-grid">${detailImages.map(renderGeneratedImageItem).join("")}</div>
     </section>
   `;
@@ -798,11 +904,26 @@ function renderDetailImages() {
 function renderGeneratedImageItem(item, index) {
   const image = item.b64_json ? `data:image/png;base64,${item.b64_json}` : item.url || "";
   const label = item.label || item.type || `图片 ${index + 1}`;
-  const downloadName = `${slugifyFileName(els.productName.value || "vision-brzazil-product")}-${slugifyFileName(label)}-hd.png`;
+  const targetSpec = item.targetSpec || {};
+  const specLines = [
+    targetSpec.canvasLabel ? `画布：${targetSpec.canvasLabel}` : "",
+    targetSpec.recommendedPixels ? `推荐尺寸：${targetSpec.recommendedPixels}` : "",
+    targetSpec.targetRatio ? `比例：${targetSpec.targetRatio}` : "",
+    targetSpec.safeArea ? `安全区：${targetSpec.safeArea}` : "",
+    targetSpec.platformRules ? `规则：${targetSpec.platformRules}` : "",
+    targetSpec.exportNote ? `导出：${targetSpec.exportNote}` : ""
+  ].filter(Boolean);
+  const downloadName = [
+    slugifyFileName(els.productName.value || "vision-brzazil-product"),
+    slugifyFileName(targetSpec.platformLabel || els.platform.value || "platform"),
+    slugifyFileName(label),
+    slugifyFileName(targetSpec.recommendedPixels || "hd")
+  ].join("-") + ".png";
   if (!image) return "";
   return `
     <article class="generated-image-item">
       <b>${escapeHtml(label)}</b>
+      ${specLines.length ? `<div class="image-spec-list">${specLines.map((line) => `<span>${escapeHtml(line)}</span>`).join("")}</div>` : ""}
       <figure class="generated-image-card"><img src="${image}" alt="${escapeHtml(label)}" /></figure>
       <a class="download-btn" href="${image}" download="${escapeHtml(downloadName)}">下载高清 PNG</a>
     </article>
@@ -1211,6 +1332,7 @@ function getRemoteTokenUsage(remoteData) {
 
 async function requestRemoteImage(pack) {
   const referenceImage = await getReferenceImageDataUrl();
+  const selectedSizeProfile = getSelectedImageSizeProfile();
   return apiRequest("/api/image", {
     method: "POST",
     body: JSON.stringify({
@@ -1218,10 +1340,47 @@ async function requestRemoteImage(pack) {
       prompts: buildImagePromptQueue(pack),
       reference_image: referenceImage,
       platform: els.platform.value,
-      size: "1024x1024",
+      size: selectedSizeProfile.apiSize || "1024x1024",
       units: referenceImage ? 6 : 4
     })
   });
+}
+
+function getSelectedImageSizeProfile() {
+  return imageSizeProfiles[els.platform.value] || imageSizeProfiles.all;
+}
+
+function getImageTargetSpec(type) {
+  const profile = getSelectedImageSizeProfile();
+  const baseSpec = String(type || "").startsWith("detail") ? profile.detailSpec : profile.defaultSpec;
+  return {
+    platformKey: els.platform.value,
+    platformLabel: profile.label,
+    apiSize: profile.apiSize || "1024x1024",
+    ...baseSpec
+  };
+}
+
+function formatSpecForPrompt(spec) {
+  return [
+    `目标平台：${spec.platformLabel}`,
+    `目标画布：${spec.canvasLabel}`,
+    `推荐上传尺寸：${spec.recommendedPixels}`,
+    `目标比例：${spec.targetRatio}`,
+    `构图安全区：${spec.safeArea}`,
+    `平台规则：${spec.platformRules}`,
+    `导出备注：${spec.exportNote}`
+  ].filter(Boolean).join("\n");
+}
+
+function withTargetSpec(type, label, brief) {
+  const targetSpec = getImageTargetSpec(type);
+  return {
+    type,
+    label,
+    targetSpec,
+    prompt: `${formatSpecForPrompt(targetSpec)}\n${brief}`
+  };
 }
 
 function buildImagePromptQueue(pack) {
@@ -1229,39 +1388,40 @@ function buildImagePromptQueue(pack) {
     `产品：${pack.productName}`,
     `必须严格保持上传参考图中的产品外观、颜色、材质、结构、比例、配件和可见细节。`,
     `不要生成不同品类、不同颜色、不同包装或额外配件。`,
-    `每次只生成一张独立图片，不要拼图，不要四宫格。`
+    `每次只生成一张独立图片，不要拼图，不要四宫格。`,
+    `如果目标尺寸与 API 输出尺寸不同，请按目标尺寸构图，在 ${getSelectedImageSizeProfile().apiSize || "1024x1024"} 画布中保留可裁切安全区。`
   ].join("\n");
   return [
-    {
-      type: "main",
-      label: "平台主图",
-      prompt: `${consistency}\n生成一张 Amazon/Mercado Livre 合规白底主图：产品居中，占画面约 85%，高清真实摄影，无文字、无水印、无 logo。`
-    },
-    {
-      type: "infographic",
-      label: "卖点信息图",
-      prompt: `${consistency}\n生成一张独立卖点信息图：保持产品主体一致，加入少量巴西葡语短卖点和清晰指示线，移动端可读，背景干净。关键词：${pack.keywords.slice(0, 8).join(", ")}。`
-    },
-    {
-      type: "lifestyle",
-      label: "巴西场景图",
-      prompt: `${consistency}\n生成一张独立巴西本地生活场景图：产品外观必须与参考图一致，放在真实使用环境中，光线自然，避免改变产品主体。`
-    },
-    {
-      type: "detail",
-      label: "尺寸细节图",
-      prompt: `${consistency}\n生成一张独立尺寸与细节图：保持产品外观一致，突出材质、接口、尺寸、包装内容或关键结构，使用简洁葡语标注。`
-    },
-    {
-      type: "detail-benefits",
-      label: "详情页卖点模块图",
-      prompt: `${consistency}\n生成一张独立详情页卖点模块图：适合商品详情页首屏，展示产品、3 个核心 beneficio、简洁葡语短句、干净高级背景，保持产品主体与参考图一致。`
-    },
-    {
-      type: "detail-usage",
-      label: "详情页使用步骤图",
-      prompt: `${consistency}\n生成一张独立详情页使用步骤或场景模块图：保持产品外观一致，展示 modo de uso、适用场景或包装内容，巴西葡语标注清晰，不要拼成主图合集。`
-    }
+    withTargetSpec(
+      "main",
+      "平台主图",
+      `${consistency}\n生成一张平台合规白底主图：产品居中，高清真实摄影，无文字、无水印、无 logo，优先满足目标平台的上传尺寸和裁切规则。`
+    ),
+    withTargetSpec(
+      "infographic",
+      "卖点信息图",
+      `${consistency}\n生成一张独立卖点信息图：保持产品主体一致，加入少量巴西葡语短卖点和清晰指示线，移动端可读，背景干净。关键词：${pack.keywords.slice(0, 8).join(", ")}。`
+    ),
+    withTargetSpec(
+      "lifestyle",
+      "巴西场景图",
+      `${consistency}\n生成一张独立巴西本地生活场景图：产品外观必须与参考图一致，放在真实使用环境中，光线自然，避免改变产品主体。`
+    ),
+    withTargetSpec(
+      "detail",
+      "尺寸细节图",
+      `${consistency}\n生成一张独立尺寸与细节图：保持产品外观一致，突出材质、接口、尺寸、包装内容或关键结构，使用简洁葡语标注。`
+    ),
+    withTargetSpec(
+      "detail-benefits",
+      "详情页卖点模块图",
+      `${consistency}\n生成一张独立详情页卖点模块图：适合商品详情页首屏，展示产品、3 个核心 beneficio、简洁葡语短句、干净高级背景，保持产品主体与参考图一致。`
+    ),
+    withTargetSpec(
+      "detail-usage",
+      "详情页使用步骤图",
+      `${consistency}\n生成一张独立详情页使用步骤或场景模块图：保持产品外观一致，展示 modo de uso、适用场景或包装内容，巴西葡语标注清晰，不要拼成主图合集。`
+    )
   ];
 }
 
