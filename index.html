@@ -31,6 +31,7 @@
           <div>
             <p class="eyebrow">VISION BRZAZIL</p>
             <h1>巴西电商视觉与详情页生成器</h1>
+            <p class="hero-copy">上传产品图作为唯一视觉基准，链接负责拆解市场策略，系统自动生成主图、卖点图和详情页模块。</p>
           </div>
           <div class="header-actions">
             <div class="status-pill" id="marketStatus">VISION BR ready</div>
@@ -43,68 +44,130 @@
           <div class="account-summary" id="accountSummary"></div>
         </section>
 
-        <section class="input-panel" aria-label="输入区">
-          <div class="upload-zone" id="uploadZone">
-            <input id="imageInput" type="file" accept="image/*" multiple />
-            <div class="upload-copy">
-              <span class="upload-icon">+</span>
-              <strong>上传产品图片</strong>
-              <span>支持多张产品图，会生成主图、场景图、信息图和详情页建议。</span>
+        <section class="workflow-panel" aria-label="生成工作流">
+          <div class="workflow-rail" aria-label="工作流步骤">
+            <div class="workflow-node" data-step="reference">
+              <span>01</span>
+              <b>产品图基准</b>
+              <small>锁定外观</small>
+            </div>
+            <div class="workflow-node" data-step="links">
+              <span>02</span>
+              <b>链接拆解</b>
+              <small>美国卖点 / 巴西本土化</small>
+            </div>
+            <div class="workflow-node" data-step="keywords">
+              <span>03</span>
+              <b>关键词校准</b>
+              <small>人工修正优先</small>
+            </div>
+            <div class="workflow-node" data-step="generate">
+              <span>04</span>
+              <b>自动生成</b>
+              <small>主图 + 详情页</small>
             </div>
           </div>
 
-          <div class="form-grid">
-            <label>
-              产品名称
-              <input id="productName" type="text" placeholder="例如：便携式榨汁杯" />
-            </label>
-            <label>
-              目标平台
-              <select id="platform">
-                <option value="amazon">Amazon Brasil</option>
-                <option value="mercado">Mercado Livre</option>
-                <option value="tiktok">TikTok Shop</option>
-                <option value="shopee">Shopee Brasil</option>
-                <option value="all">四平台通用方案</option>
-              </select>
-            </label>
-            <label>
-              模型供应商
-              <select id="modelProvider">
-                <option value="openai">ChatGPT 5.5 Pro 最高级模型</option>
-                <option value="gemini">Google Gemini</option>
-                <option value="claude">Claude + 外部生图</option>
-                <option value="local">本地模型 / ComfyUI</option>
-                <option value="manual">仅生成提示词</option>
-              </select>
-            </label>
-          </div>
+          <section class="input-panel" aria-label="输入区">
+            <div class="workflow-card reference-card">
+              <div class="step-heading">
+                <span>01</span>
+                <div>
+                  <b>上传产品图片</b>
+                  <p>这是生成图片的最高优先级。系统只允许改变背景、光线、构图和葡语卖点表达，不允许改变产品本体。</p>
+                </div>
+              </div>
+              <div class="upload-zone" id="uploadZone">
+                <input id="imageInput" type="file" accept="image/*" multiple />
+                <div class="upload-copy">
+                  <span class="upload-icon">+</span>
+                  <strong>拖入或点击上传产品图</strong>
+                  <span>建议上传正面图、细节图、包装图；第一张会作为主视觉参考。</span>
+                </div>
+              </div>
+              <section class="preview-strip" id="previewStrip" aria-label="图片预览"></section>
+            </div>
 
-          <label>
-            多条产品链接
-            <textarea id="productUrl" rows="5" placeholder="每行一条链接，可混合美国竞品链接和巴西本地链接&#10;https://www.amazon.com/...&#10;https://www.amazon.com.br/...&#10;https://produto.mercadolivre.com.br/..."></textarea>
-          </label>
+            <div class="workflow-card">
+              <div class="step-heading">
+                <span>02</span>
+                <div>
+                  <b>输入产品链接</b>
+                  <p>美国链接用于拆解竞品卖点、主图构图和详情页模块；巴西链接用于判断当地需求、葡语表达和信任要素。</p>
+                </div>
+              </div>
+              <label>
+                多条产品链接
+                <textarea id="productUrl" rows="5" placeholder="每行一条链接，可混合美国竞品链接和巴西本地链接&#10;美国链接：https://www.amazon.com/...&#10;巴西链接：https://www.amazon.com.br/...&#10;巴西链接：https://produto.mercadolivre.com.br/..."></textarea>
+              </label>
+            </div>
 
-          <label>
-            卖点文字描述
-            <textarea id="sellingPoints" rows="6" placeholder="写入产品核心卖点、材质、尺寸、适用人群、差异化优势、禁用词等。"></textarea>
-          </label>
+            <div class="workflow-card">
+              <div class="step-heading">
+                <span>03</span>
+                <div>
+                  <b>校准关键词和卖点</b>
+                  <p>卖点文字负责补充真实规格；人工关键词会覆盖自动拆解词，用于主图文案和详情页 SEO。</p>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label>
+                  产品名称
+                  <input id="productName" type="text" placeholder="例如：便携式榨汁杯" />
+                </label>
+                <label>
+                  目标平台
+                  <select id="platform">
+                    <option value="amazon">Amazon Brasil</option>
+                    <option value="mercado">Mercado Livre</option>
+                    <option value="tiktok">TikTok Shop</option>
+                    <option value="shopee">Shopee Brasil</option>
+                    <option value="all">四平台通用方案</option>
+                  </select>
+                </label>
+                <label>
+                  模型供应商
+                  <select id="modelProvider">
+                    <option value="openai">ChatGPT 5.5 Pro 最高级模型</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="claude">Claude + 外部生图</option>
+                    <option value="local">本地模型 / ComfyUI</option>
+                    <option value="manual">仅生成提示词</option>
+                  </select>
+                </label>
+              </div>
 
-          <label>
-            人工修正关键词
-            <textarea id="manualKeywords" rows="4" placeholder="可手动修正最终关键词，逗号或换行分隔。填写后会覆盖自动拆解关键词，用于链接分析、图片生成和详情页。"></textarea>
-          </label>
+              <div class="form-grid dense-grid">
+                <label>
+                  卖点文字描述
+                  <textarea id="sellingPoints" rows="5" placeholder="写入产品核心卖点、材质、尺寸、适用人群、差异化优势、禁用词等。"></textarea>
+                </label>
 
-          <div class="control-row">
-            <button id="generateBtn" class="primary-btn" type="button">生成方案</button>
-            <button id="saveDraftBtn" class="ghost-btn" type="button">保存草稿</button>
-            <button id="loadDraftBtn" class="ghost-btn" type="button">载入草稿</button>
-            <button id="copyBtn" class="ghost-btn" type="button">复制提示词</button>
-            <button id="resetBtn" class="ghost-btn" type="button">清空</button>
-          </div>
+                <label>
+                  人工修正关键词
+                  <textarea id="manualKeywords" rows="5" placeholder="可手动修正最终关键词，逗号或换行分隔。填写后会覆盖自动拆解关键词，用于链接分析、图片生成和详情页。"></textarea>
+                </label>
+              </div>
+            </div>
+
+            <div class="workflow-card action-card">
+              <div class="step-heading">
+                <span>04</span>
+                <div>
+                  <b>一键生成主图和详情页</b>
+                  <p>先拆解链接和关键词，再生成独立主图、信息图、场景图、详情页模块图，并提供下载。</p>
+                </div>
+              </div>
+              <div class="control-row">
+                <button id="generateBtn" class="primary-btn" type="button">开始自动生成</button>
+                <button id="saveDraftBtn" class="ghost-btn" type="button">保存草稿</button>
+                <button id="loadDraftBtn" class="ghost-btn" type="button">载入草稿</button>
+                <button id="copyBtn" class="ghost-btn" type="button">复制提示词</button>
+                <button id="resetBtn" class="ghost-btn" type="button">清空</button>
+              </div>
+            </div>
+          </section>
         </section>
-
-        <section class="preview-strip" id="previewStrip" aria-label="图片预览"></section>
       </section>
 
       <aside class="output-panel" aria-label="输出区">

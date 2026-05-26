@@ -28,6 +28,18 @@ body {
   font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", sans-serif;
 }
 
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(76, 29, 149, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(76, 29, 149, 0.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent 70%);
+}
+
 button,
 input,
 textarea,
@@ -98,7 +110,7 @@ select {
 
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(390px, 0.92fr);
+  grid-template-columns: minmax(0, 1.02fr) minmax(420px, 0.98fr);
   gap: 22px;
   min-height: 100vh;
   padding: 22px;
@@ -113,7 +125,7 @@ select {
 
 .workspace {
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto;
   gap: 18px;
   padding: 24px;
 }
@@ -151,6 +163,14 @@ h1 {
   max-width: 780px;
 }
 
+.hero-copy {
+  max-width: 720px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
 .status-pill {
   flex: 0 0 auto;
   border: 1px solid rgba(124, 58, 237, 0.38);
@@ -175,6 +195,109 @@ h1 {
 .input-panel {
   display: grid;
   gap: 16px;
+}
+
+.workflow-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.workflow-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.workflow-node,
+.workflow-card {
+  border: 1px solid rgba(124, 58, 237, 0.22);
+  background:
+    linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(255, 255, 255, 0.78) 52%),
+    rgba(255, 255, 255, 0.72);
+}
+
+.workflow-node {
+  position: relative;
+  min-height: 92px;
+  padding: 13px;
+  overflow: hidden;
+}
+
+.workflow-node::after {
+  content: "";
+  position: absolute;
+  right: -18px;
+  top: 50%;
+  width: 42px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--accent), transparent);
+}
+
+.workflow-node:last-child::after {
+  display: none;
+}
+
+.workflow-node span,
+.step-heading span {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  background: #2a1744;
+  color: #fffaff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.workflow-node b {
+  display: block;
+  margin: 9px 0 3px;
+}
+
+.workflow-node small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.workflow-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.reference-card {
+  gap: 12px;
+}
+
+.step-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.step-heading b {
+  display: block;
+  color: var(--ink);
+  font-size: 17px;
+  margin-bottom: 4px;
+}
+
+.step-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dense-grid {
+  align-items: start;
+}
+
+.action-card {
+  background:
+    linear-gradient(135deg, rgba(76, 29, 149, 0.14), rgba(219, 39, 119, 0.08)),
+    rgba(255, 255, 255, 0.76);
 }
 
 .account-bar {
@@ -215,7 +338,7 @@ h1 {
 
 .upload-zone {
   position: relative;
-  min-height: 162px;
+  min-height: 150px;
   border: 2px dashed rgba(124, 58, 237, 0.42);
   background:
     linear-gradient(90deg, rgba(124, 58, 237, 0.1), transparent),
@@ -343,6 +466,7 @@ button:disabled {
   background: white;
   border: 1px solid var(--line);
   overflow: hidden;
+  margin: 0;
 }
 
 .preview-card img {
@@ -539,6 +663,54 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin: 14px 0 18px;
+}
+
+.workflow-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 18px;
+}
+
+.workflow-status {
+  border: 1px solid var(--line);
+  background: white;
+  padding: 12px;
+}
+
+.workflow-status span {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  background: #efe7fb;
+  color: var(--accent-dark);
+  font-weight: 900;
+  font-size: 12px;
+  margin-bottom: 9px;
+}
+
+.workflow-status b {
+  display: block;
+  color: var(--ink);
+  margin-bottom: 5px;
+}
+
+.workflow-status p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.workflow-status.ready {
+  border-color: rgba(124, 58, 237, 0.34);
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.08), white);
+}
+
+.workflow-status.blocked {
+  border-color: rgba(190, 24, 93, 0.34);
+  background: linear-gradient(135deg, rgba(190, 24, 93, 0.08), white);
 }
 
 .signal {
@@ -895,7 +1067,8 @@ mark {
 
   .topbar,
   .header-actions,
-  .form-grid {
+  .form-grid,
+  .workflow-rail {
     grid-template-columns: 1fr;
   }
 
@@ -913,6 +1086,7 @@ mark {
 
   .account-bar,
   .account-summary,
+  .workflow-status-grid,
   .link-analysis-list,
   .direction-grid,
   .keyword-review,

@@ -639,13 +639,13 @@ function parseProductLinks(rawText) {
 function buildLinkStrategySummary(sourceGroups) {
   const parts = [];
   if (sourceGroups.us.length) {
-    parts.push("美国链接：提炼竞品卖点、视觉设计、主图构图、详情页模块和英文关键词。");
+    parts.push("美国链接：只用于提炼竞品卖点、视觉层级、主图构图、详情页模块顺序和英文关键词，不作为产品外观参考。");
   }
   if (sourceGroups.br.length) {
-    parts.push("巴西链接：判断当地平台语境、消费者需求、葡语表达、价格敏感点和本地化信任要素。");
+    parts.push("巴西链接：用于判断当地平台语境、消费者需求、葡语表达、价格敏感点、物流售后信任和本土化页面习惯。");
   }
   if (sourceGroups.other.length) {
-    parts.push("其他市场链接：补充跨市场趋势、使用场景和差异化表达。");
+    parts.push("其他市场链接：只补充跨市场趋势、使用场景和差异化表达，不改变上传产品图片里的产品本体。");
   }
   return parts.join(" ") || "未提供链接：以产品图和卖点文字生成基础方案。";
 }
@@ -736,24 +736,27 @@ function buildPromptPack() {
   const imagePrompt = [
     `角色：你是巴西电商视觉总监和葡语转化文案专家。`,
     `模型优先级：默认第一优先级使用 ChatGPT 5.5 Pro 最高级模型（API 模型标识：gpt-5.5）进行链接拆解、关键词判断、图片提示词和详情页生成；其他 API 仅作为备用或人工指定。`,
-    `目标：基于上传的 ${imageCount} 张产品参考图，生成符合 ${platform.label} 的产品图片方案。`,
+    `最高优先级：上传的 ${imageCount} 张产品图片是唯一产品外观基准。必须保持产品形状、颜色、材质、结构、尺寸比例、配件、包装和可见细节；链接内容只用于卖点和市场策略，绝不能替代或改写产品本体。`,
+    `目标：基于上传产品图片生成符合 ${platform.label} 的主图、卖点图、场景图和详情页模块图。`,
     `产品：${productName}`,
     `巴西市场定位：重视价格感、耐用性、清晰规格、快速理解和真实使用场景。`,
     `链接拆解来源：${urlInfo.domains.join(", ")}；平台线索：${urlInfo.platformGuesses.join(", ")}；ID 线索：${urlInfo.ids.join(", ") || "无"}`,
     `跨市场参考策略：${urlInfo.summary}`,
-    `美国竞品参考：提取高频卖点、视觉结构、主图卖点表达、详情页模块顺序和消费者痛点。`,
-    `巴西本地化优化：结合巴西链接判断当地需求、葡语短句、价格敏感点、信任背书、配送/售后表达和平台规则。`,
+    `美国竞品链接分析：提取高频卖点、视觉层级、主图信息表达、详情页模块顺序和消费者痛点；不得复制竞品品牌、外观、包装或把竞品当成生成主体。`,
+    `巴西本地化链接分析：结合巴西链接判断当地需求、葡语短句、价格敏感点、信任背书、配送/售后表达、平台规则和移动端阅读习惯。`,
     `关键词信号：${keywords.join(", ") || "待补充"}${manualKeywords.length ? "（人工修正关键词，优先级最高）" : "（自动拆解关键词）"}`,
     `核心卖点：${sellingPoints.join("；") || "请根据产品图识别材质、功能、使用场景和差异化优势"}`,
     `图片规则：${platform.imageRules.join(" ")}`,
-    `输出图片：1 张平台合规主图 + 4-8 张副图，覆盖细节、尺寸、使用场景、包装清单、对比和痛点解决。`,
-    `视觉要求：真实产品比例，巴西葡萄牙语短文案，手机端可读，避免水印、平台 Logo、虚假折扣、医疗功效、绝对化承诺。`,
-    `负面提示词：blurry, distorted product, wrong logo, watermark, unreadable text, fake discount badge, medical claim, exaggerated guarantee, extra accessories not included.`
+    `输出图片：每次生成一张独立图片，最终队列包含 1 张平台合规主图 + 多张副图，覆盖细节、尺寸、使用场景、包装清单、对比和痛点解决。`,
+    `视觉要求：产品本体必须与上传图一致；只优化背景、光线、构图、道具环境和巴西葡萄牙语短文案；手机端可读；避免水印、平台 Logo、虚假折扣、医疗功效、绝对化承诺。`,
+    `负面提示词：different product, changed color, changed material, wrong shape, wrong packaging, missing accessory, extra accessories not included, blurry, distorted product, wrong logo, watermark, unreadable text, fake discount badge, medical claim, exaggerated guarantee.`
   ].join("\n");
 
   const detailPrompt = [
     `模型优先级：默认第一优先级使用 ChatGPT 5.5 Pro 最高级模型（API 模型标识：gpt-5.5）；其他 API 仅作为备用或人工指定。`,
     `请为 ${platform.label} 生成巴西葡萄牙语商品详情页。`,
+    `产品事实来源优先级：1 上传产品图片，2 用户填写卖点和规格，3 美国链接竞品卖点，4 巴西链接本土化表达。不得编造上传图中不存在的配件、材质、认证或功能。`,
+    `美国链接用途：拆分竞品痛点、卖点排序、详情页模块结构和视觉表达方向。巴西链接用途：校准葡语、当地需求、配送售后信任、价格敏感点和平台页面习惯。`,
     `语气：${platform.tone}`,
     `结构：${platform.detailShape.join(" / ")}`,
     `必须包含：标题、5 个核心卖点、规格参数、包装清单、使用场景、FAQ、合规风险提醒、可用于图片的信息图短句。`,
@@ -807,14 +810,59 @@ function titleCase(text) {
   return text.replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function getWorkflowState(pack) {
+  return [
+    {
+      step: "01",
+      title: "产品图基准",
+      status: state.images.length ? "ready" : "pending",
+      note: state.images.length ? `${state.images.length} 张产品图已上传，第一张作为主视觉基准。` : "请先上传产品图，否则生图只能按文字猜测。"
+    },
+    {
+      step: "02",
+      title: "链接拆解",
+      status: pack.urlInfo.providedCount ? "ready" : "pending",
+      note: `美国 ${pack.urlInfo.sourceGroups.us.length} 条，巴西 ${pack.urlInfo.sourceGroups.br.length} 条；链接只提供策略，不改变产品外观。`
+    },
+    {
+      step: "03",
+      title: "关键词校准",
+      status: pack.keywords.length ? "ready" : "pending",
+      note: pack.manualKeywords.length ? "正在使用人工修正关键词，优先级最高。" : "当前使用自动拆解关键词，可手动修正。"
+    },
+    {
+      step: "04",
+      title: "生成输出",
+      status: canUseSelection(getCurrentAccount(), els.platform.value, els.modelProvider.value) ? "ready" : "blocked",
+      note: accountLimitReason(getCurrentAccount())
+    }
+  ];
+}
+
+function renderWorkflowState(items) {
+  return `
+    <div class="workflow-status-grid">
+      ${items.map((item) => `
+        <article class="workflow-status ${item.status}">
+          <span>${escapeHtml(item.step)}</span>
+          <b>${escapeHtml(item.title)}</b>
+          <p>${escapeHtml(item.note)}</p>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderOutputs() {
   if (!getCurrentAccount()) return;
   const pack = buildPromptPack();
   renderAccountControls(pack);
   state.latestPrompt = `${pack.imagePrompt}\n\n--- DETAILS ---\n${pack.detailPrompt}`;
+  const workflow = getWorkflowState(pack);
 
   els.briefOutput.innerHTML = `
-    <h2>链接拆解结果</h2>
+    <h2>工作流拆解结果</h2>
+    ${renderWorkflowState(workflow)}
     <div class="signal-grid">
       <div class="signal"><b>链接数量</b><span>${pack.urlInfo.providedCount} 条</span></div>
       <div class="signal"><b>来源域名</b><span>${escapeHtml(pack.urlInfo.domains.join(" · "))}</span></div>
@@ -837,10 +885,10 @@ function renderOutputs() {
     <div class="link-analysis-list">${renderLinkAnalysis(pack.urlInfo.links)}</div>
     <h3>主图与详情页方向</h3>
     <div class="direction-grid">
-      <div><b>美国链接拆分</b><span>提取竞品卖点、设计风格、主图构图、场景表达、详情页模块顺序。</span></div>
+      <div><b>产品图基准</b><span>上传图片决定产品外观、颜色、材质、比例、配件和包装；链接不能改变产品本体。</span></div>
+      <div><b>美国链接拆分</b><span>只提取竞品卖点、设计层级、主图构图、场景表达、详情页模块顺序。</span></div>
       <div><b>巴西链接本地化</b><span>校准葡语表达、当地痛点、价格敏感度、物流售后信任、平台页面习惯。</span></div>
-      <div><b>主图方向</b><span>产品主体清晰，首图合规；副图用葡语短句表达功能、规格、场景和包装内容。</span></div>
-      <div><b>详情页方向</b><span>按巴西消费者决策路径组织：痛点、利益点、规格、使用方法、FAQ、保障。</span></div>
+      <div><b>自动生成方向</b><span>先生成合规主图，再生成信息图、场景图、尺寸细节图和详情页模块图。</span></div>
     </div>
   `;
 
@@ -1428,8 +1476,9 @@ function withTargetSpec(type, label, brief) {
 function buildImagePromptQueue(pack) {
   const consistency = [
     `产品：${pack.productName}`,
-    `必须严格保持上传参考图中的产品外观、颜色、材质、结构、比例、配件和可见细节。`,
-    `不要生成不同品类、不同颜色、不同包装或额外配件。`,
+    `最高优先级：上传产品图片是唯一视觉基准。必须严格保持参考图中的产品外观、颜色、材质、结构、比例、配件、包装和可见细节。`,
+    `美国链接只用于拆解卖点、设计层级、主图构图和详情页模块；巴西链接只用于本土化需求、葡语表达和信任要素。`,
+    `不要把链接里的竞品外观、颜色、包装或品牌带入生成结果。不要生成不同品类、不同颜色、不同包装或额外配件。`,
     `每次只生成一张独立图片，不要拼图，不要四宫格。`,
     `如果目标尺寸与 API 输出尺寸不同，请按目标尺寸构图，在 ${getSelectedImageSizeProfile().apiSize || "1024x1024"} 画布中保留可裁切安全区。`
   ].join("\n");
@@ -1651,7 +1700,7 @@ els.generateBtn.addEventListener("click", async () => {
 
   if (imageSettled.status === "fulfilled") {
     const imageData = imageSettled.value;
-    state.latestImageResult = imageData.image || imageData;
+    state.latestImageResult = imageData;
     state.latestImageStatus = `真实图片已返回，模型：${imageData.model || "gpt-image-2"}，规格：${imageData.size || "1024x1024"}`;
     generatedSomething = true;
   } else {
