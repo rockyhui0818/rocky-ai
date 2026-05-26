@@ -18,8 +18,42 @@ function dataUrlToBlob(dataUrl) {
   return new Blob([bytes], { type: match[1] });
 }
 
+async function readProviderPayload(response) {
+  const rawText = await response.text().catch(() => "");
+  if (!rawText) return { data: {}, rawText: "" };
+  try {
+    return { data: JSON.parse(rawText), rawText };
+  } catch {
+    return { data: {}, rawText };
+  }
+}
+
+function cleanProviderText(value) {
+  return String(value || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 700);
+}
+
+function getProviderMessage(data, rawText, fallback) {
+  const error = data?.error;
+  return (
+    error?.message ||
+    error?.error?.message ||
+    (typeof error === "string" ? error : "") ||
+    data?.message ||
+    data?.detail ||
+    cleanProviderText(rawText) ||
+    fallback
+  );
+}
+
 async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceImage }) {
   const referenceBlob = dataUrlToBlob(referenceImage);
+  let editFailure = null;
   if (referenceBlob) {
     const form = new FormData();
     form.append("model", model);
@@ -32,10 +66,17 @@ async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceIma
       headers: { Authorization: `Bearer ${apiKey}` },
       body: form
     });
-    const editData = await editResponse.json().catch(() => ({}));
+    const { data: editData, rawText: editRawText } = await readProviderPayload(editResponse);
     if (editResponse.ok) {
       return { data: editData, mode: "reference-edit" };
     }
+    editFailure = {
+      endpoint: "/images/edits",
+      status: editResponse.status,
+      message: getProviderMessage(editData, editRawText, "Reference image edit request failed."),
+      details: editData,
+      raw: cleanProviderText(editRawText)
+    };
   }
 
   const response = await fetch(`${baseUrl}/images/generations`, {
@@ -52,11 +93,19 @@ async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceIma
       response_format: "b64_json"
     })
   });
-  const data = await response.json();
+  const { data, rawText } = await readProviderPayload(response);
   if (!response.ok) {
-    const error = new Error(data?.error?.message || "The image provider returned an error.");
+    const message = getProviderMessage(data, rawText, "The image provider returned an error.");
+    const error = new Error(message);
     error.statusCode = response.status;
-    error.details = data;
+    error.details = {
+      endpoint: "/images/generations",
+      status: response.status,
+      provider_message: message,
+      provider_details: data,
+      provider_raw: cleanProviderText(rawText),
+      reference_edit_failure: editFailure
+    };
     throw error;
   }
   return { data, mode: "text-generation" };
@@ -92,6 +141,7 @@ module.exports = async function handler(req, res) {
     const images = [];
     const modes = new Set();
 
+    const failures = [];
     for (const item of prompts.slice(0, 6)) {
       const finalPrompt = [
         String(item.prompt || prompt),
@@ -100,22 +150,43 @@ module.exports = async function handler(req, res) {
         "Use the uploaded product reference as the source of truth for shape, color, material, proportions, visible features, and included accessories.",
         "Do not invent a different product. Do not change core product design. Generate one standalone marketplace image only, not a collage."
       ].join("\n");
-      const result = await requestImage({
-        baseUrl,
-        apiKey,
+      try {
+        const result = await requestImage({
+          baseUrl,
+          apiKey,
+          model,
+          prompt: finalPrompt,
+          size,
+          referenceImage: payload.reference_image
+        });
+        modes.add(result.mode);
+        images.push({
+          type: item.type || "image",
+          label: item.label || item.type || "图片",
+          targetSpec: item.targetSpec || null,
+          prompt: finalPrompt,
+          ...firstImage(result.data)
+        });
+      } catch (itemError) {
+        failures.push({
+          type: item.type || "image",
+          label: item.label || item.type || "图片",
+          targetSpec: item.targetSpec || null,
+          message: itemError.message,
+          details: itemError.details || null
+        });
+      }
+    }
+
+    if (!images.length && failures.length) {
+      const error = new Error(failures[0]?.message || "All image generation requests failed.");
+      error.statusCode = failures[0]?.details?.status || 502;
+      error.details = {
         model,
-        prompt: finalPrompt,
         size,
-        referenceImage: payload.reference_image
-      });
-      modes.add(result.mode);
-      images.push({
-        type: item.type || "image",
-        label: item.label || item.type || "图片",
-        targetSpec: item.targetSpec || null,
-        prompt: finalPrompt,
-        ...firstImage(result.data)
-      });
+        failures
+      };
+      throw error;
     }
 
     let updatedAccount = account;
@@ -137,6 +208,7 @@ module.exports = async function handler(req, res) {
             prompt_preview: prompt.slice(0, 500),
             size,
             image_count: images.length,
+            failed_image_count: failures.length,
             mode: Array.from(modes).join(",")
           }
         })
@@ -154,6 +226,7 @@ module.exports = async function handler(req, res) {
       size,
       mode: Array.from(modes).join(","),
       images,
+      failures,
       image: images[0] || {},
       account: publicAccount(updatedAccount)
     });

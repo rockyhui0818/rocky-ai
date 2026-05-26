@@ -478,6 +478,21 @@ button:disabled {
   line-height: 1.45;
 }
 
+.image-failure-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.image-failure-list p {
+  margin: 0;
+  padding: 10px;
+  border-left: 4px solid #be185d;
+  background: rgba(190, 24, 93, 0.08);
+  color: #5a1234;
+  overflow-wrap: anywhere;
+}
+
 .generated-image-card img {
   display: block;
   width: 100%;

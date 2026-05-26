@@ -21,6 +21,7 @@ const platformProfiles = {
   },
   tiktok: {
     label: "TikTok Shop",
+    generationLabel: "短视频电商移动端",
     tone: "短视频转化、场景感强、前三秒抓注意力",
     imageRules: [
       "建议至少 5 张、最多 9 张方图，首图白底突出产品本体。",
@@ -54,6 +55,7 @@ const platformProfiles = {
 const imageSizeProfiles = {
   amazon: {
     label: "Amazon Brasil",
+    generationLabel: "Amazon Brasil",
     apiSize: "1024x1024",
     defaultSpec: {
       canvasLabel: "Amazon 商品图库方图",
@@ -74,6 +76,7 @@ const imageSizeProfiles = {
   },
   mercado: {
     label: "Mercado Livre",
+    generationLabel: "Mercado Livre",
     apiSize: "1024x1024",
     defaultSpec: {
       canvasLabel: "Mercado Livre 商品图",
@@ -94,17 +97,18 @@ const imageSizeProfiles = {
   },
   tiktok: {
     label: "TikTok Shop",
+    generationLabel: "短视频电商移动端",
     apiSize: "1024x1024",
     defaultSpec: {
-      canvasLabel: "TikTok Shop 商品方图",
+      canvasLabel: "短视频电商商品方图",
       targetRatio: "1:1",
       recommendedPixels: "1200x1200 px",
       safeArea: "产品居中，首图产品占 80%-90%，移动端缩略图也能看清。",
       platformRules: "商品图至少 600x600；最多 9 张方图；主图白底且展示正面实物；避免文字、边框、水印或遮挡产品。",
-      exportNote: "当前 API 输出 1024x1024，适合 TikTok Shop 移动端预览；上架前可导出 1200x1200。"
+      exportNote: "当前 API 输出 1024x1024，适合短视频电商移动端预览；上架前可导出 1200x1200。"
     },
     detailSpec: {
-      canvasLabel: "TikTok Shop 移动详情图",
+      canvasLabel: "短视频电商移动详情图",
       targetRatio: "1:1",
       recommendedPixels: "1200x1200 px",
       safeArea: "以手机瀑布流阅读为主，文字控制在 3-5 个短词组，按钮/标签不要贴边。",
@@ -114,6 +118,7 @@ const imageSizeProfiles = {
   },
   shopee: {
     label: "Shopee Brasil",
+    generationLabel: "Shopee Brasil",
     apiSize: "1024x1024",
     defaultSpec: {
       canvasLabel: "Shopee 商品方图",
@@ -134,6 +139,7 @@ const imageSizeProfiles = {
   },
   all: {
     label: "四平台通用",
+    generationLabel: "巴西跨平台电商",
     apiSize: "1024x1024",
     defaultSpec: {
       canvasLabel: "跨平台通用主图",
@@ -393,6 +399,22 @@ async function apiRequest(path, options = {}) {
     throw error;
   }
   return data;
+}
+
+function summarizeApiError(error) {
+  const payload = error?.payload || {};
+  const detail = payload.details || {};
+  const failures = Array.isArray(detail.failures) ? detail.failures : [];
+  const firstFailure = failures[0] || {};
+  const providerDetails = firstFailure.details || detail;
+  return [
+    error?.message,
+    firstFailure.message,
+    providerDetails.provider_message,
+    providerDetails.reference_edit_failure?.message,
+    providerDetails.provider_raw,
+    payload.error
+  ].filter(Boolean).find((item) => String(item).trim()) || "请检查 API 配置或稍后重试。";
 }
 
 function getCurrentAccount() {
@@ -876,14 +898,33 @@ function renderImageResult() {
   const sizeSummary = imageItems.some((item) => item.targetSpec?.recommendedPixels)
     ? "每张图片下方已标注对应平台推荐尺寸"
     : "每张图片均为独立高清 1024x1024 PNG";
+  const failures = Array.isArray(state.latestImageResult?.details?.failures)
+    ? state.latestImageResult.details.failures
+    : Array.isArray(state.latestImageResult?.failures)
+      ? state.latestImageResult.failures
+      : [];
   return `
     <section class="generated-section">
       <h3>真实生成图片</h3>
       <p>${escapeHtml(state.latestImageStatus || "图片 API 已返回")} · ${escapeHtml(sizeSummary)}</p>
+      ${failures.length ? renderImageFailures(failures) : ""}
       ${imageItems.length ? `<div class="generated-image-grid">${imageItems.map(renderGeneratedImageItem).join("")}</div>` : ""}
       ${!imageItems.length && state.latestImageResult ? `<div class="data-block">${escapeHtml(JSON.stringify(state.latestImageResult, null, 2))}</div>` : ""}
       ${state.latestImageResult?.revised_prompt ? `<div class="prompt-block">${escapeHtml(state.latestImageResult.revised_prompt)}</div>` : ""}
     </section>
+  `;
+}
+
+function renderImageFailures(failures) {
+  return `
+    <div class="image-failure-list">
+      ${failures.map((failure) => {
+        const detail = failure.details || {};
+        const referenceFailure = detail.reference_edit_failure?.message ? `；参考图编辑失败：${detail.reference_edit_failure.message}` : "";
+        const providerRaw = detail.provider_raw ? `；原始返回：${detail.provider_raw}` : "";
+        return `<p><b>${escapeHtml(failure.label || failure.type || "图片")}</b> ${escapeHtml(failure.message || detail.provider_message || "生成失败")}${escapeHtml(referenceFailure + providerRaw)}</p>`;
+      }).join("")}
+    </div>
   `;
 }
 
@@ -1356,6 +1397,7 @@ function getImageTargetSpec(type) {
   return {
     platformKey: els.platform.value,
     platformLabel: profile.label,
+    generationLabel: profile.generationLabel || profile.label,
     apiSize: profile.apiSize || "1024x1024",
     ...baseSpec
   };
@@ -1363,7 +1405,7 @@ function getImageTargetSpec(type) {
 
 function formatSpecForPrompt(spec) {
   return [
-    `目标平台：${spec.platformLabel}`,
+    `目标平台：${spec.generationLabel || spec.platformLabel}`,
     `目标画布：${spec.canvasLabel}`,
     `推荐上传尺寸：${spec.recommendedPixels}`,
     `目标比例：${spec.targetRatio}`,
@@ -1615,7 +1657,7 @@ els.generateBtn.addEventListener("click", async () => {
   } else {
     const error = imageSettled.reason || {};
     state.latestImageResult = error.payload || { message: error.message };
-    state.latestImageStatus = `图片生成失败：${error.message || "请检查 API 配置或稍后重试。"}`;
+    state.latestImageStatus = `图片生成失败：${summarizeApiError(error)}`;
   }
 
   if (!generatedSomething) {
