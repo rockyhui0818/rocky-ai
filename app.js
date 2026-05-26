@@ -735,6 +735,7 @@ function renderOutputs() {
 
   els.detailOutput.innerHTML = `
     <h2>详情页</h2>
+    ${renderDetailImages()}
     ${renderGeneratedDetail()}
     <h3>详情页生成提示词</h3>
     <div class="prompt-block">${escapeHtml(pack.detailPrompt)}</div>
@@ -758,13 +759,17 @@ function renderOutputs() {
   renderAdminOutput(pack);
 }
 
-function renderImageResult() {
-  if (!state.latestImageStatus && !state.latestImageResult) return "";
-  const imageItems = Array.isArray(state.latestImageResult?.images) && state.latestImageResult.images.length
+function getGeneratedImageItems() {
+  return Array.isArray(state.latestImageResult?.images) && state.latestImageResult.images.length
     ? state.latestImageResult.images
     : state.latestImageResult?.b64_json || state.latestImageResult?.url
       ? [state.latestImageResult]
       : [];
+}
+
+function renderImageResult() {
+  if (!state.latestImageStatus && !state.latestImageResult) return "";
+  const imageItems = getGeneratedImageItems();
   return `
     <section class="generated-section">
       <h3>真实生成图片</h3>
@@ -772,6 +777,20 @@ function renderImageResult() {
       ${imageItems.length ? `<div class="generated-image-grid">${imageItems.map(renderGeneratedImageItem).join("")}</div>` : ""}
       ${!imageItems.length && state.latestImageResult ? `<div class="data-block">${escapeHtml(JSON.stringify(state.latestImageResult, null, 2))}</div>` : ""}
       ${state.latestImageResult?.revised_prompt ? `<div class="prompt-block">${escapeHtml(state.latestImageResult.revised_prompt)}</div>` : ""}
+    </section>
+  `;
+}
+
+function renderDetailImages() {
+  const detailImages = getGeneratedImageItems().filter((item) => String(item.type || "").startsWith("detail"));
+  if (!detailImages.length) {
+    return `<p>点击“生成方案”后，这里会显示详情页模块图片；主图和其他图片显示在“图片提示词”标签页。</p>`;
+  }
+  return `
+    <section class="generated-section">
+      <h3>详情页生成图片</h3>
+      <p>以下为独立详情页模块图，每张均可单独下载。</p>
+      <div class="generated-image-grid">${detailImages.map(renderGeneratedImageItem).join("")}</div>
     </section>
   `;
 }
@@ -1232,6 +1251,16 @@ function buildImagePromptQueue(pack) {
       type: "detail",
       label: "尺寸细节图",
       prompt: `${consistency}\n生成一张独立尺寸与细节图：保持产品外观一致，突出材质、接口、尺寸、包装内容或关键结构，使用简洁葡语标注。`
+    },
+    {
+      type: "detail-benefits",
+      label: "详情页卖点模块图",
+      prompt: `${consistency}\n生成一张独立详情页卖点模块图：适合商品详情页首屏，展示产品、3 个核心 beneficio、简洁葡语短句、干净高级背景，保持产品主体与参考图一致。`
+    },
+    {
+      type: "detail-usage",
+      label: "详情页使用步骤图",
+      prompt: `${consistency}\n生成一张独立详情页使用步骤或场景模块图：保持产品外观一致，展示 modo de uso、适用场景或包装内容，巴西葡语标注清晰，不要拼成主图合集。`
     }
   ];
 }
