@@ -763,14 +763,27 @@ function renderImageResult() {
   const image = state.latestImageResult?.b64_json
     ? `data:image/png;base64,${state.latestImageResult.b64_json}`
     : state.latestImageResult?.url || "";
+  const downloadName = `${slugifyFileName(els.productName.value || "vision-brzazil-product")}-hd.png`;
   return `
     <section class="generated-section">
       <h3>真实生成图片</h3>
-      <p>${escapeHtml(state.latestImageStatus || "图片 API 已返回")}</p>
+      <p>${escapeHtml(state.latestImageStatus || "图片 API 已返回")} · 高清规格 1024x1024 PNG</p>
       ${image ? `<figure class="generated-image-card"><img src="${image}" alt="AI generated product visual" /></figure>` : ""}
+      ${image ? `<a class="download-btn" href="${image}" download="${escapeHtml(downloadName)}">下载高清 PNG</a>` : ""}
       ${state.latestImageResult?.revised_prompt ? `<div class="prompt-block">${escapeHtml(state.latestImageResult.revised_prompt)}</div>` : ""}
     </section>
   `;
+}
+
+function slugifyFileName(value) {
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "vision-brzazil-product";
 }
 
 function renderGeneratedDetail() {

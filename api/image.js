@@ -32,6 +32,7 @@ module.exports = async function handler(req, res) {
     const payload = await readJson(req);
     const account = await getAccountByToken(getBearerToken(req)).catch(() => null);
     const prompt = String(payload.prompt || "").trim();
+    const size = payload.size || "1024x1024";
     if (!prompt) return sendJson(res, 400, { error: "PROMPT_REQUIRED", message: "Image prompt is required." });
 
     const response = await fetch(`${baseUrl}/images/generations`, {
@@ -44,7 +45,7 @@ module.exports = async function handler(req, res) {
         model,
         prompt,
         n: 1,
-        size: payload.size || "1024x1024",
+        size,
         response_format: "b64_json"
       })
     });
@@ -75,7 +76,7 @@ module.exports = async function handler(req, res) {
           metadata: {
             provider_model: model,
             prompt_preview: prompt.slice(0, 500),
-            size: payload.size || "1024x1024"
+            size
           }
         })
       });
@@ -89,6 +90,7 @@ module.exports = async function handler(req, res) {
     return sendJson(res, 200, {
       ok: true,
       model,
+      size,
       image: firstImage(data),
       account: publicAccount(updatedAccount)
     });

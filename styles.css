@@ -454,6 +454,23 @@ button:disabled {
   object-fit: contain;
 }
 
+.download-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 16px;
+  margin: 0 0 14px;
+  background: var(--accent);
+  color: white;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.download-btn:hover {
+  background: var(--accent-dark);
+}
+
 .detail-output-card {
   display: grid;
   gap: 10px;
