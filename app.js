@@ -760,19 +760,33 @@ function renderOutputs() {
 
 function renderImageResult() {
   if (!state.latestImageStatus && !state.latestImageResult) return "";
-  const image = state.latestImageResult?.b64_json
-    ? `data:image/png;base64,${state.latestImageResult.b64_json}`
-    : state.latestImageResult?.url || "";
-  const downloadName = `${slugifyFileName(els.productName.value || "vision-brzazil-product")}-hd.png`;
+  const imageItems = Array.isArray(state.latestImageResult?.images) && state.latestImageResult.images.length
+    ? state.latestImageResult.images
+    : state.latestImageResult?.b64_json || state.latestImageResult?.url
+      ? [state.latestImageResult]
+      : [];
   return `
     <section class="generated-section">
       <h3>真实生成图片</h3>
-      <p>${escapeHtml(state.latestImageStatus || "图片 API 已返回")} · 高清规格 1024x1024 PNG</p>
-      ${image ? `<figure class="generated-image-card"><img src="${image}" alt="AI generated product visual" /></figure>` : ""}
-      ${image ? `<a class="download-btn" href="${image}" download="${escapeHtml(downloadName)}">下载高清 PNG</a>` : ""}
-      ${!image && state.latestImageResult ? `<div class="data-block">${escapeHtml(JSON.stringify(state.latestImageResult, null, 2))}</div>` : ""}
+      <p>${escapeHtml(state.latestImageStatus || "图片 API 已返回")} · 每张图片均为独立高清 1024x1024 PNG</p>
+      ${imageItems.length ? `<div class="generated-image-grid">${imageItems.map(renderGeneratedImageItem).join("")}</div>` : ""}
+      ${!imageItems.length && state.latestImageResult ? `<div class="data-block">${escapeHtml(JSON.stringify(state.latestImageResult, null, 2))}</div>` : ""}
       ${state.latestImageResult?.revised_prompt ? `<div class="prompt-block">${escapeHtml(state.latestImageResult.revised_prompt)}</div>` : ""}
     </section>
+  `;
+}
+
+function renderGeneratedImageItem(item, index) {
+  const image = item.b64_json ? `data:image/png;base64,${item.b64_json}` : item.url || "";
+  const label = item.label || item.type || `图片 ${index + 1}`;
+  const downloadName = `${slugifyFileName(els.productName.value || "vision-brzazil-product")}-${slugifyFileName(label)}-hd.png`;
+  if (!image) return "";
+  return `
+    <article class="generated-image-item">
+      <b>${escapeHtml(label)}</b>
+      <figure class="generated-image-card"><img src="${image}" alt="${escapeHtml(label)}" /></figure>
+      <a class="download-btn" href="${image}" download="${escapeHtml(downloadName)}">下载高清 PNG</a>
+    </article>
   `;
 }
 
@@ -1177,14 +1191,59 @@ function getRemoteTokenUsage(remoteData) {
 }
 
 async function requestRemoteImage(pack) {
+  const referenceImage = await getReferenceImageDataUrl();
   return apiRequest("/api/image", {
     method: "POST",
     body: JSON.stringify({
       prompt: pack.imagePrompt,
+      prompts: buildImagePromptQueue(pack),
+      reference_image: referenceImage,
       platform: els.platform.value,
       size: "1024x1024",
-      units: 3
+      units: referenceImage ? 6 : 4
     })
+  });
+}
+
+function buildImagePromptQueue(pack) {
+  const consistency = [
+    `产品：${pack.productName}`,
+    `必须严格保持上传参考图中的产品外观、颜色、材质、结构、比例、配件和可见细节。`,
+    `不要生成不同品类、不同颜色、不同包装或额外配件。`,
+    `每次只生成一张独立图片，不要拼图，不要四宫格。`
+  ].join("\n");
+  return [
+    {
+      type: "main",
+      label: "平台主图",
+      prompt: `${consistency}\n生成一张 Amazon/Mercado Livre 合规白底主图：产品居中，占画面约 85%，高清真实摄影，无文字、无水印、无 logo。`
+    },
+    {
+      type: "infographic",
+      label: "卖点信息图",
+      prompt: `${consistency}\n生成一张独立卖点信息图：保持产品主体一致，加入少量巴西葡语短卖点和清晰指示线，移动端可读，背景干净。关键词：${pack.keywords.slice(0, 8).join(", ")}。`
+    },
+    {
+      type: "lifestyle",
+      label: "巴西场景图",
+      prompt: `${consistency}\n生成一张独立巴西本地生活场景图：产品外观必须与参考图一致，放在真实使用环境中，光线自然，避免改变产品主体。`
+    },
+    {
+      type: "detail",
+      label: "尺寸细节图",
+      prompt: `${consistency}\n生成一张独立尺寸与细节图：保持产品外观一致，突出材质、接口、尺寸、包装内容或关键结构，使用简洁葡语标注。`
+    }
+  ];
+}
+
+function getReferenceImageDataUrl() {
+  const firstImage = state.images[0]?.file;
+  if (!firstImage) return Promise.resolve("");
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(firstImage);
   });
 }
 
@@ -1291,6 +1350,7 @@ function escapeHtml(value) {
 function renderPreviews(files) {
   state.images.forEach((image) => URL.revokeObjectURL(image.url));
   state.images = Array.from(files).map((file) => ({
+    file,
     name: file.name,
     type: file.type,
     size: file.size,

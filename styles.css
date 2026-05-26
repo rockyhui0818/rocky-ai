@@ -447,6 +447,24 @@ button:disabled {
   padding: 10px;
 }
 
+.generated-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.generated-image-item {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.88);
+  padding: 10px;
+}
+
+.generated-image-item > b {
+  display: block;
+  color: var(--accent-dark);
+  margin-bottom: 8px;
+}
+
 .generated-image-card img {
   display: block;
   width: 100%;

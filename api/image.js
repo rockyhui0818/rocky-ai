@@ -11,6 +11,57 @@ function firstImage(data) {
   };
 }
 
+function dataUrlToBlob(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return null;
+  const bytes = Buffer.from(match[2], "base64");
+  return new Blob([bytes], { type: match[1] });
+}
+
+async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceImage }) {
+  const referenceBlob = dataUrlToBlob(referenceImage);
+  if (referenceBlob) {
+    const form = new FormData();
+    form.append("model", model);
+    form.append("prompt", prompt);
+    form.append("size", size);
+    form.append("response_format", "b64_json");
+    form.append("image", referenceBlob, "product-reference.png");
+    const editResponse = await fetch(`${baseUrl}/images/edits`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form
+    });
+    const editData = await editResponse.json().catch(() => ({}));
+    if (editResponse.ok) {
+      return { data: editData, mode: "reference-edit" };
+    }
+  }
+
+  const response = await fetch(`${baseUrl}/images/generations`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      prompt,
+      n: 1,
+      size,
+      response_format: "b64_json"
+    })
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    const error = new Error(data?.error?.message || "The image provider returned an error.");
+    error.statusCode = response.status;
+    error.details = data;
+    throw error;
+  }
+  return { data, mode: "text-generation" };
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -35,27 +86,34 @@ module.exports = async function handler(req, res) {
     const size = payload.size || "1024x1024";
     if (!prompt) return sendJson(res, 400, { error: "PROMPT_REQUIRED", message: "Image prompt is required." });
 
-    const response = await fetch(`${baseUrl}/images/generations`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model,
-        prompt,
-        n: 1,
-        size,
-        response_format: "b64_json"
-      })
-    });
+    const prompts = Array.isArray(payload.prompts) && payload.prompts.length
+      ? payload.prompts
+      : [{ type: payload.type || "main", prompt }];
+    const images = [];
+    const modes = new Set();
 
-    const data = await response.json();
-    if (!response.ok) {
-      return sendJson(res, response.status, {
-        error: "IMAGE_REQUEST_FAILED",
-        message: data?.error?.message || "The image provider returned an error.",
-        provider_status: response.status
+    for (const item of prompts.slice(0, 6)) {
+      const finalPrompt = [
+        String(item.prompt || prompt),
+        "",
+        "Critical product consistency rules:",
+        "Use the uploaded product reference as the source of truth for shape, color, material, proportions, visible features, and included accessories.",
+        "Do not invent a different product. Do not change core product design. Generate one standalone marketplace image only, not a collage."
+      ].join("\n");
+      const result = await requestImage({
+        baseUrl,
+        apiKey,
+        model,
+        prompt: finalPrompt,
+        size,
+        referenceImage: payload.reference_image
+      });
+      modes.add(result.mode);
+      images.push({
+        type: item.type || "image",
+        label: item.label || item.type || "图片",
+        prompt: finalPrompt,
+        ...firstImage(result.data)
       });
     }
 
@@ -76,7 +134,9 @@ module.exports = async function handler(req, res) {
           metadata: {
             provider_model: model,
             prompt_preview: prompt.slice(0, 500),
-            size
+            size,
+            image_count: images.length,
+            mode: Array.from(modes).join(",")
           }
         })
       });
@@ -91,13 +151,16 @@ module.exports = async function handler(req, res) {
       ok: true,
       model,
       size,
-      image: firstImage(data),
+      mode: Array.from(modes).join(","),
+      images,
+      image: images[0] || {},
       account: publicAccount(updatedAccount)
     });
   } catch (error) {
-    return sendJson(res, 500, {
+    return sendJson(res, error.statusCode || 500, {
       error: "IMAGE_GENERATION_FAILED",
-      message: error.message
+      message: error.message,
+      details: error.details
     });
   }
 };
