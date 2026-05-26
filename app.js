@@ -770,6 +770,7 @@ function renderImageResult() {
       <p>${escapeHtml(state.latestImageStatus || "图片 API 已返回")} · 高清规格 1024x1024 PNG</p>
       ${image ? `<figure class="generated-image-card"><img src="${image}" alt="AI generated product visual" /></figure>` : ""}
       ${image ? `<a class="download-btn" href="${image}" download="${escapeHtml(downloadName)}">下载高清 PNG</a>` : ""}
+      ${!image && state.latestImageResult ? `<div class="data-block">${escapeHtml(JSON.stringify(state.latestImageResult, null, 2))}</div>` : ""}
       ${state.latestImageResult?.revised_prompt ? `<div class="prompt-block">${escapeHtml(state.latestImageResult.revised_prompt)}</div>` : ""}
     </section>
   `;
@@ -1332,15 +1333,13 @@ els.generateBtn.addEventListener("click", async () => {
   els.generateBtn.disabled = true;
   els.generateBtn.textContent = "正在生成详情页和图片...";
 
+  let generatedSomething = false;
+
   try {
-    const [remoteData, imageData] = await Promise.all([
-      requestRemoteGeneration(pack),
-      requestRemoteImage(pack)
-    ]);
+    const remoteData = await requestRemoteGeneration(pack);
     state.latestRemoteResult = remoteData.result || remoteData.rawText || remoteData;
     state.latestRemoteStatus = `真实 API 已返回，模型：${remoteData.model || pack.model.model}`;
-    state.latestImageResult = imageData.image || imageData;
-    state.latestImageStatus = `真实图片已返回，模型：${imageData.model || "gpt-image-2"}`;
+    generatedSomething = true;
     if (remoteData.account) {
       upsertAccount(remoteData.account);
       state.currentAccountId = remoteData.account.id;
@@ -1348,18 +1347,27 @@ els.generateBtn.addEventListener("click", async () => {
     } else {
       recordUsageEvent(pack, getRemoteTokenUsage(remoteData));
     }
-    activateTab("image");
   } catch (error) {
     state.latestRemoteResult = error.payload || { message: error.message };
     state.latestRemoteStatus = "生成接口调用失败，已回退为本地提示词生成模式。";
-    state.latestImageResult = error.payload || { message: error.message };
-    state.latestImageStatus = "图片生成失败，请检查 API 配置或稍后重试。";
-    recordUsageEvent(pack);
-    activateTab("image");
-  } finally {
-    els.generateBtn.textContent = originalText;
-    renderOutputs();
   }
+
+  try {
+    const imageData = await requestRemoteImage(pack);
+    state.latestImageResult = imageData.image || imageData;
+    state.latestImageStatus = `真实图片已返回，模型：${imageData.model || "gpt-image-2"}，规格：${imageData.size || "1024x1024"}`;
+    generatedSomething = true;
+  } catch (error) {
+    state.latestImageResult = error.payload || { message: error.message };
+    state.latestImageStatus = `图片生成失败：${error.message || "请检查 API 配置或稍后重试。"}`;
+  }
+
+  if (!generatedSomething) {
+    recordUsageEvent(pack);
+  }
+  activateTab("image");
+  els.generateBtn.textContent = originalText;
+  renderOutputs();
 });
 
 els.copyBtn.addEventListener("click", async () => {
