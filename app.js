@@ -1335,8 +1335,13 @@ els.generateBtn.addEventListener("click", async () => {
 
   let generatedSomething = false;
 
-  try {
-    const remoteData = await requestRemoteGeneration(pack);
+  const [detailSettled, imageSettled] = await Promise.allSettled([
+    requestRemoteGeneration(pack),
+    requestRemoteImage(pack)
+  ]);
+
+  if (detailSettled.status === "fulfilled") {
+    const remoteData = detailSettled.value;
     state.latestRemoteResult = remoteData.result || remoteData.rawText || remoteData;
     state.latestRemoteStatus = `真实 API 已返回，模型：${remoteData.model || pack.model.model}`;
     generatedSomething = true;
@@ -1347,17 +1352,19 @@ els.generateBtn.addEventListener("click", async () => {
     } else {
       recordUsageEvent(pack, getRemoteTokenUsage(remoteData));
     }
-  } catch (error) {
+  } else {
+    const error = detailSettled.reason || {};
     state.latestRemoteResult = error.payload || { message: error.message };
     state.latestRemoteStatus = "生成接口调用失败，已回退为本地提示词生成模式。";
   }
 
-  try {
-    const imageData = await requestRemoteImage(pack);
+  if (imageSettled.status === "fulfilled") {
+    const imageData = imageSettled.value;
     state.latestImageResult = imageData.image || imageData;
     state.latestImageStatus = `真实图片已返回，模型：${imageData.model || "gpt-image-2"}，规格：${imageData.size || "1024x1024"}`;
     generatedSomething = true;
-  } catch (error) {
+  } else {
+    const error = imageSettled.reason || {};
     state.latestImageResult = error.payload || { message: error.message };
     state.latestImageStatus = `图片生成失败：${error.message || "请检查 API 配置或稍后重试。"}`;
   }
