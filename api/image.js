@@ -51,6 +51,22 @@ function getProviderMessage(data, rawText, fallback) {
   );
 }
 
+function isRetryableProviderError(error) {
+  const status = Number(error?.details?.status || error?.statusCode || 0);
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    status === 408 ||
+    status === 409 ||
+    status === 425 ||
+    status === 429 ||
+    status >= 500 ||
+    message.includes("timeout") ||
+    message.includes("timed out") ||
+    message.includes("temporarily") ||
+    message.includes("rate limit")
+  );
+}
+
 async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceImage }) {
   const referenceBlob = dataUrlToBlob(referenceImage);
   let editFailure = null;
@@ -142,7 +158,8 @@ module.exports = async function handler(req, res) {
     const modes = new Set();
 
     const failures = [];
-    for (const item of prompts.slice(0, 6)) {
+    const maxImages = Math.max(1, Math.min(Number(payload.max_images || 3), 4));
+    for (const item of prompts.slice(0, maxImages)) {
       const finalPrompt = [
         String(item.prompt || prompt),
         "",
@@ -151,14 +168,27 @@ module.exports = async function handler(req, res) {
         "Do not invent a different product. Do not change core product design. Generate one standalone marketplace image only, not a collage."
       ].join("\n");
       try {
-        const result = await requestImage({
-          baseUrl,
-          apiKey,
-          model,
-          prompt: finalPrompt,
-          size,
-          referenceImage: payload.reference_image
-        });
+        let result;
+        try {
+          result = await requestImage({
+            baseUrl,
+            apiKey,
+            model,
+            prompt: finalPrompt,
+            size,
+            referenceImage: payload.reference_image
+          });
+        } catch (firstError) {
+          if (!isRetryableProviderError(firstError)) throw firstError;
+          result = await requestImage({
+            baseUrl,
+            apiKey,
+            model,
+            prompt: finalPrompt,
+            size,
+            referenceImage: payload.reference_image
+          });
+        }
         modes.add(result.mode);
         images.push({
           type: item.type || "image",
@@ -207,6 +237,7 @@ module.exports = async function handler(req, res) {
             provider_model: model,
             prompt_preview: prompt.slice(0, 500),
             size,
+            max_images: maxImages,
             image_count: images.length,
             failed_image_count: failures.length,
             mode: Array.from(modes).join(",")

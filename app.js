@@ -392,13 +392,30 @@ async function apiRequest(path, options = {}) {
       ...(options.headers || {})
     }
   });
-  const data = await response.json().catch(() => ({}));
+  const rawText = await response.text().catch(() => "");
+  let data = {};
+  try {
+    data = rawText ? JSON.parse(rawText) : {};
+  } catch {
+    data = { message: cleanApiResponseText(rawText), raw: rawText.slice(0, 1200) };
+  }
   if (!response.ok) {
-    const error = new Error(data.message || data.error || "API 请求失败");
+    const error = new Error(data.message || data.error || `${response.status} ${response.statusText || "API 请求失败"}`);
     error.payload = data;
+    error.status = response.status;
     throw error;
   }
   return data;
+}
+
+function cleanApiResponseText(value) {
+  return String(value || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 700);
 }
 
 function summarizeApiError(error) {
@@ -413,6 +430,7 @@ function summarizeApiError(error) {
     providerDetails.provider_message,
     providerDetails.reference_edit_failure?.message,
     providerDetails.provider_raw,
+    payload.message,
     payload.error
   ].filter(Boolean).find((item) => String(item).trim()) || "请检查 API 配置或稍后重试。";
 }
@@ -742,8 +760,8 @@ function buildPromptPack() {
     `巴西市场定位：重视价格感、耐用性、清晰规格、快速理解和真实使用场景。`,
     `链接拆解来源：${urlInfo.domains.join(", ")}；平台线索：${urlInfo.platformGuesses.join(", ")}；ID 线索：${urlInfo.ids.join(", ") || "无"}`,
     `跨市场参考策略：${urlInfo.summary}`,
-    `美国竞品链接分析：提取高频卖点、视觉层级、主图信息表达、详情页模块顺序和消费者痛点；不得复制竞品品牌、外观、包装或把竞品当成生成主体。`,
-    `巴西本地化链接分析：结合巴西链接判断当地需求、葡语短句、价格敏感点、信任背书、配送/售后表达、平台规则和移动端阅读习惯。`,
+    `美国竞品链接分析是主要方向：重点拆解美国链接的主图构图、卖点信息图结构、详情页模块顺序、视觉层级、痛点表达、对比方式和消费者购买理由；不得复制竞品品牌、外观、包装或把竞品当成生成主体。`,
+    `巴西链接只做本土化分析：校准更本土的葡语短句、当地生活场景、价格敏感点、信任背书、配送/售后表达、平台规则和移动端阅读习惯。`,
     `关键词信号：${keywords.join(", ") || "待补充"}${manualKeywords.length ? "（人工修正关键词，优先级最高）" : "（自动拆解关键词）"}`,
     `核心卖点：${sellingPoints.join("；") || "请根据产品图识别材质、功能、使用场景和差异化优势"}`,
     `图片规则：${platform.imageRules.join(" ")}`,
@@ -756,7 +774,7 @@ function buildPromptPack() {
     `模型优先级：默认第一优先级使用 ChatGPT 5.5 Pro 最高级模型（API 模型标识：gpt-5.5）；其他 API 仅作为备用或人工指定。`,
     `请为 ${platform.label} 生成巴西葡萄牙语商品详情页。`,
     `产品事实来源优先级：1 上传产品图片，2 用户填写卖点和规格，3 美国链接竞品卖点，4 巴西链接本土化表达。不得编造上传图中不存在的配件、材质、认证或功能。`,
-    `美国链接用途：拆分竞品痛点、卖点排序、详情页模块结构和视觉表达方向。巴西链接用途：校准葡语、当地需求、配送售后信任、价格敏感点和平台页面习惯。`,
+    `美国链接用途是主要方向：拆分主图设计、详情页模块结构、竞品痛点、卖点排序、信息图表达和视觉层级。巴西链接用途是本土化：校准葡语、当地需求、本土场景、配送售后信任、价格敏感点和平台页面习惯。`,
     `语气：${platform.tone}`,
     `结构：${platform.detailShape.join(" / ")}`,
     `必须包含：标题、5 个核心卖点、规格参数、包装清单、使用场景、FAQ、合规风险提醒、可用于图片的信息图短句。`,
@@ -1422,17 +1440,58 @@ function getRemoteTokenUsage(remoteData) {
 async function requestRemoteImage(pack) {
   const referenceImage = await getReferenceImageDataUrl();
   const selectedSizeProfile = getSelectedImageSizeProfile();
-  return apiRequest("/api/image", {
-    method: "POST",
-    body: JSON.stringify({
-      prompt: pack.imagePrompt,
-      prompts: buildImagePromptQueue(pack),
-      reference_image: referenceImage,
-      platform: els.platform.value,
-      size: selectedSizeProfile.apiSize || "1024x1024",
-      units: referenceImage ? 6 : 4
-    })
-  });
+  const basePayload = {
+    prompt: pack.imagePrompt,
+    reference_image: referenceImage,
+    platform: els.platform.value,
+    size: selectedSizeProfile.apiSize || "1024x1024",
+    max_images: 1,
+    units: referenceImage ? 2 : 1
+  };
+  const priorityPrompts = buildImagePromptQueue(pack).slice(0, 2);
+  const settled = await Promise.allSettled(
+    priorityPrompts.map((item) => apiRequest("/api/image", {
+      method: "POST",
+      body: JSON.stringify({
+        ...basePayload,
+        prompts: [item]
+      })
+    }))
+  );
+
+  const fulfilled = settled.filter((item) => item.status === "fulfilled").map((item) => item.value);
+  const rejected = settled.filter((item) => item.status === "rejected").map((item) => item.reason);
+  const images = fulfilled.flatMap((item) => item.images || (item.image ? [item.image] : []));
+  const failures = [
+    ...fulfilled.flatMap((item) => item.failures || []),
+    ...rejected.map((error, index) => ({
+      type: priorityPrompts[index]?.type || "image",
+      label: priorityPrompts[index]?.label || "图片",
+      message: summarizeApiError(error),
+      details: error?.payload?.details || error?.payload || null
+    }))
+  ];
+
+  if (!images.length && rejected.length) {
+    const error = new Error(failures[0]?.message || "图片 API 请求失败");
+    error.payload = {
+      error: "IMAGE_GENERATION_FAILED",
+      message: error.message,
+      details: { failures }
+    };
+    throw error;
+  }
+
+  return {
+    ok: true,
+    model: fulfilled[0]?.model || "gpt-image-2",
+    size: fulfilled[0]?.size || selectedSizeProfile.apiSize || "1024x1024",
+    mode: [...new Set(fulfilled.map((item) => item.mode).filter(Boolean))].join(","),
+    images,
+    failures,
+    image: images[0] || {},
+    account: fulfilled.find((item) => item.account)?.account || null
+  };
 }
 
 function getSelectedImageSizeProfile() {
@@ -1489,29 +1548,14 @@ function buildImagePromptQueue(pack) {
       `${consistency}\n生成一张平台合规白底主图：产品居中，高清真实摄影，无文字、无水印、无 logo，优先满足目标平台的上传尺寸和裁切规则。`
     ),
     withTargetSpec(
-      "infographic",
-      "卖点信息图",
-      `${consistency}\n生成一张独立卖点信息图：保持产品主体一致，加入少量巴西葡语短卖点和清晰指示线，移动端可读，背景干净。关键词：${pack.keywords.slice(0, 8).join(", ")}。`
-    ),
-    withTargetSpec(
-      "lifestyle",
-      "巴西场景图",
-      `${consistency}\n生成一张独立巴西本地生活场景图：产品外观必须与参考图一致，放在真实使用环境中，光线自然，避免改变产品主体。`
-    ),
-    withTargetSpec(
-      "detail",
-      "尺寸细节图",
-      `${consistency}\n生成一张独立尺寸与细节图：保持产品外观一致，突出材质、接口、尺寸、包装内容或关键结构，使用简洁葡语标注。`
-    ),
-    withTargetSpec(
       "detail-benefits",
       "详情页卖点模块图",
-      `${consistency}\n生成一张独立详情页卖点模块图：适合商品详情页首屏，展示产品、3 个核心 beneficio、简洁葡语短句、干净高级背景，保持产品主体与参考图一致。`
+      `${consistency}\n生成一张独立详情页卖点模块图：主要参考美国链接里的详情页模块结构、视觉层级、卖点排序和设计方向，但产品外观必须来自上传图；巴西链接只用于把短句、本土场景和信任表达本地化。展示产品、3 个核心 beneficio、简洁葡语短句、干净高级背景。`
     ),
     withTargetSpec(
-      "detail-usage",
-      "详情页使用步骤图",
-      `${consistency}\n生成一张独立详情页使用步骤或场景模块图：保持产品外观一致，展示 modo de uso、适用场景或包装内容，巴西葡语标注清晰，不要拼成主图合集。`
+      "infographic",
+      "卖点信息图",
+      `${consistency}\n生成一张独立卖点信息图：主要参考美国链接的主图卖点表达和信息层级；保持产品主体一致，加入少量巴西葡语短卖点和清晰指示线，移动端可读，背景干净。关键词：${pack.keywords.slice(0, 8).join(", ")}。`
     )
   ];
 }
