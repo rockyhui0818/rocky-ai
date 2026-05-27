@@ -18,6 +18,10 @@ function dataUrlToBlob(dataUrl) {
   return new Blob([bytes], { type: match[1] });
 }
 
+function estimateBytes(value) {
+  return Buffer.byteLength(String(value || ""), "utf8");
+}
+
 async function readProviderPayload(response) {
   const rawText = await response.text().catch(() => "");
   if (!rawText) return { data: {}, rawText: "" };
@@ -150,6 +154,17 @@ module.exports = async function handler(req, res) {
     const prompt = String(payload.prompt || "").trim();
     const size = payload.size || "1024x1024";
     if (!prompt) return sendJson(res, 400, { error: "PROMPT_REQUIRED", message: "Image prompt is required." });
+    const referenceBytes = estimateBytes(payload.reference_image);
+    if (referenceBytes > 900000) {
+      return sendJson(res, 413, {
+        error: "REFERENCE_IMAGE_TOO_LARGE",
+        message: "上传参考图体积过大，请换用更小图片或等待前端压缩后再生成。",
+        details: {
+          reference_bytes: referenceBytes,
+          max_reference_bytes: 900000
+        }
+      });
+    }
 
     const prompts = Array.isArray(payload.prompts) && payload.prompts.length
       ? payload.prompts

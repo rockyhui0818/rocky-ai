@@ -292,6 +292,7 @@ const state = {
   latestImageResult: null,
   latestImageStatus: "",
   imageJobs: [],
+  referenceImageInfo: null,
   authToken: localStorage.getItem("commerceStudio.authToken") || "",
   cloudMode: false,
   accounts: loadStoredJson("commerceStudio.accounts", defaultAccounts),
@@ -978,6 +979,7 @@ function renderImageResult() {
     <section class="generated-section">
       <h3>真实生成图片</h3>
       <p>${escapeHtml(state.latestImageStatus || "图片 API 已返回")} · ${escapeHtml(sizeSummary)}</p>
+      ${state.referenceImageInfo ? `<p class="reference-compress-note">参考图已压缩用于 API：${escapeHtml(state.referenceImageInfo.width)}x${escapeHtml(state.referenceImageInfo.height)} · ${escapeHtml(formatBytes(state.referenceImageInfo.bytes))}，产品外观仍作为生成基准。</p>` : ""}
       ${state.imageJobs.length ? renderImageJobProgress() : ""}
       ${failures.length ? renderImageFailures(failures) : ""}
       ${imageItems.length ? `<div class="generated-image-grid">${imageItems.map(renderGeneratedImageItem).join("")}</div>` : ""}
@@ -1094,6 +1096,13 @@ function slugifyFileName(value) {
     .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48) || "vision-brzazil-product";
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(2)} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${value} B`;
 }
 
 function renderGeneratedDetail() {
@@ -1489,7 +1498,7 @@ async function requestRemoteImage(pack) {
   const referenceImage = await getReferenceImageDataUrl();
   const selectedSizeProfile = getSelectedImageSizeProfile();
   const basePayload = {
-    prompt: pack.imagePrompt,
+    prompt: `${pack.productName} marketplace image`,
     reference_image: referenceImage,
     platform: els.platform.value,
     size: selectedSizeProfile.apiSize || "1024x1024",
@@ -1670,7 +1679,34 @@ function getReferenceImageDataUrl() {
   if (!firstImage) return Promise.resolve("");
   return new Promise((resolve) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxSide = 768;
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, width, height);
+        context.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
+        state.referenceImageInfo = {
+          width,
+          height,
+          bytes: Math.round((dataUrl.length * 3) / 4)
+        };
+        resolve(dataUrl);
+      };
+      img.onerror = () => {
+        state.referenceImageInfo = null;
+        resolve(String(reader.result || ""));
+      };
+      img.src = String(reader.result || "");
+    };
     reader.onerror = () => resolve("");
     reader.readAsDataURL(firstImage);
   });
@@ -1896,6 +1932,7 @@ els.resetBtn.addEventListener("click", () => {
   state.latestImageResult = null;
   state.latestImageStatus = "";
   state.imageJobs = [];
+  state.referenceImageInfo = null;
   renderPreviews([]);
   renderOutputs();
   activateTab("brief");

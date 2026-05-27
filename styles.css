@@ -626,6 +626,15 @@ button:disabled {
   background: rgba(255, 255, 255, 0.72);
 }
 
+.reference-compress-note {
+  margin: 8px 0 12px;
+  padding: 9px 10px;
+  background: rgba(124, 58, 237, 0.08);
+  border-left: 4px solid var(--accent);
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .progress-heading {
   display: flex;
   justify-content: space-between;
