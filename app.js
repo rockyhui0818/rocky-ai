@@ -291,6 +291,7 @@ const state = {
   latestRemoteStatus: "",
   latestImageResult: null,
   latestImageStatus: "",
+  imageJobs: [],
   authToken: localStorage.getItem("commerceStudio.authToken") || "",
   cloudMode: false,
   accounts: loadStoredJson("commerceStudio.accounts", defaultAccounts),
@@ -951,6 +952,10 @@ function renderOutputs() {
 }
 
 function getGeneratedImageItems() {
+  const jobImages = state.imageJobs
+    .map((job) => job.image)
+    .filter(Boolean);
+  if (jobImages.length) return jobImages;
   return Array.isArray(state.latestImageResult?.images) && state.latestImageResult.images.length
     ? state.latestImageResult.images
     : state.latestImageResult?.b64_json || state.latestImageResult?.url
@@ -959,7 +964,7 @@ function getGeneratedImageItems() {
 }
 
 function renderImageResult() {
-  if (!state.latestImageStatus && !state.latestImageResult) return "";
+  if (!state.latestImageStatus && !state.latestImageResult && !state.imageJobs.length) return "";
   const imageItems = getGeneratedImageItems();
   const sizeSummary = imageItems.some((item) => item.targetSpec?.recommendedPixels)
     ? "每张图片下方已标注对应平台推荐尺寸"
@@ -973,11 +978,48 @@ function renderImageResult() {
     <section class="generated-section">
       <h3>真实生成图片</h3>
       <p>${escapeHtml(state.latestImageStatus || "图片 API 已返回")} · ${escapeHtml(sizeSummary)}</p>
+      ${state.imageJobs.length ? renderImageJobProgress() : ""}
       ${failures.length ? renderImageFailures(failures) : ""}
       ${imageItems.length ? `<div class="generated-image-grid">${imageItems.map(renderGeneratedImageItem).join("")}</div>` : ""}
       ${!imageItems.length && state.latestImageResult ? `<div class="data-block">${escapeHtml(JSON.stringify(state.latestImageResult, null, 2))}</div>` : ""}
       ${state.latestImageResult?.revised_prompt ? `<div class="prompt-block">${escapeHtml(state.latestImageResult.revised_prompt)}</div>` : ""}
     </section>
+  `;
+}
+
+function renderImageJobProgress() {
+  const doneCount = state.imageJobs.filter((job) => job.status === "success").length;
+  const activeIndex = state.imageJobs.findIndex((job) => job.status === "running");
+  const percent = state.imageJobs.length ? Math.round((doneCount / state.imageJobs.length) * 100) : 0;
+  return `
+    <div class="image-progress-panel">
+      <div class="progress-heading">
+        <b>逐张生成进度</b>
+        <span>${doneCount}/${state.imageJobs.length} 已完成${activeIndex >= 0 ? ` · 正在生成第 ${activeIndex + 1} 张` : ""}</span>
+      </div>
+      <div class="progress-track"><span style="width:${percent}%"></span></div>
+      <div class="image-job-list">
+        ${state.imageJobs.map(renderImageJobItem).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderImageJobItem(job, index) {
+  const statusText = {
+    pending: "等待中",
+    running: "生成中",
+    success: "已完成",
+    error: "失败"
+  }[job.status] || "等待中";
+  return `
+    <article class="image-job-item ${escapeHtml(job.status || "pending")}">
+      <div>
+        <b>${index + 1}. ${escapeHtml(job.label || job.type || "图片")}</b>
+        <span>${escapeHtml(job.message || statusText)}</span>
+      </div>
+      ${job.image ? `<a class="mini-download" href="${job.image.b64_json ? `data:image/png;base64,${job.image.b64_json}` : job.image.url || ""}" download="${escapeHtml(buildImageDownloadName(job.image, index))}">下载</a>` : `<em>${escapeHtml(statusText)}</em>`}
+    </article>
   `;
 }
 
@@ -1020,12 +1062,7 @@ function renderGeneratedImageItem(item, index) {
     targetSpec.platformRules ? `规则：${targetSpec.platformRules}` : "",
     targetSpec.exportNote ? `导出：${targetSpec.exportNote}` : ""
   ].filter(Boolean);
-  const downloadName = [
-    slugifyFileName(els.productName.value || "vision-brzazil-product"),
-    slugifyFileName(targetSpec.platformLabel || els.platform.value || "platform"),
-    slugifyFileName(label),
-    slugifyFileName(targetSpec.recommendedPixels || "hd")
-  ].join("-") + ".png";
+  const downloadName = buildImageDownloadName(item, index);
   if (!image) return "";
   return `
     <article class="generated-image-item">
@@ -1035,6 +1072,17 @@ function renderGeneratedImageItem(item, index) {
       <a class="download-btn" href="${image}" download="${escapeHtml(downloadName)}">下载高清 PNG</a>
     </article>
   `;
+}
+
+function buildImageDownloadName(item, index = 0) {
+  const label = item.label || item.type || `图片 ${index + 1}`;
+  const targetSpec = item.targetSpec || {};
+  return [
+    slugifyFileName(els.productName.value || "vision-brzazil-product"),
+    slugifyFileName(targetSpec.platformLabel || els.platform.value || "platform"),
+    slugifyFileName(label),
+    slugifyFileName(targetSpec.recommendedPixels || "hd")
+  ].join("-") + ".png";
 }
 
 function slugifyFileName(value) {
@@ -1449,30 +1497,87 @@ async function requestRemoteImage(pack) {
     units: referenceImage ? 2 : 1
   };
   const priorityPrompts = buildImagePromptQueue(pack).slice(0, 2);
-  const settled = await Promise.allSettled(
-    priorityPrompts.map((item) => apiRequest("/api/image", {
+  state.imageJobs = priorityPrompts.map((item) => ({
+    type: item.type,
+    label: item.label,
+    targetSpec: item.targetSpec || null,
+    status: "pending",
+    message: "等待生成"
+  }));
+  state.latestImageResult = { ok: true, images: [], failures: [] };
+  state.latestImageStatus = `图片队列已创建：共 ${state.imageJobs.length} 张，将逐张生成。`;
+  renderOutputs();
+
+  const images = [];
+  const failures = [];
+  const modes = new Set();
+  let model = "gpt-image-2";
+  let size = selectedSizeProfile.apiSize || "1024x1024";
+  let account = null;
+
+  for (let index = 0; index < priorityPrompts.length; index += 1) {
+    const item = priorityPrompts[index];
+    state.imageJobs[index] = {
+      ...state.imageJobs[index],
+      status: "running",
+      message: "正在调用图片模型，请稍候..."
+    };
+    state.latestImageStatus = `正在生成第 ${index + 1}/${priorityPrompts.length} 张：${item.label}`;
+    renderOutputs();
+
+    try {
+      const data = await apiRequest("/api/image", {
       method: "POST",
       body: JSON.stringify({
         ...basePayload,
         prompts: [item]
       })
-    }))
-  );
+      });
+      const itemImages = data.images || (data.image ? [data.image] : []);
+      const firstImage = itemImages[0] ? {
+        ...itemImages[0],
+        type: itemImages[0].type || item.type,
+        label: itemImages[0].label || item.label,
+        targetSpec: itemImages[0].targetSpec || item.targetSpec || null
+      } : null;
+      if (firstImage) images.push(firstImage);
+      failures.push(...(data.failures || []));
+      if (data.mode) modes.add(data.mode);
+      model = data.model || model;
+      size = data.size || size;
+      account = data.account || account;
+      state.imageJobs[index] = {
+        ...state.imageJobs[index],
+        status: firstImage ? "success" : "error",
+        message: firstImage ? "生成完成，可下载高清 PNG。" : "未返回图片，请查看失败原因。",
+        image: firstImage || null
+      };
+      state.latestImageResult = { ok: true, model, size, mode: Array.from(modes).join(","), images, failures, image: images[0] || {}, account };
+      state.latestImageStatus = firstImage
+        ? `第 ${index + 1}/${priorityPrompts.length} 张已完成：${item.label}`
+        : `第 ${index + 1}/${priorityPrompts.length} 张未返回图片：${item.label}`;
+      renderOutputs();
+    } catch (error) {
+      const failure = {
+        type: item.type || "image",
+        label: item.label || "图片",
+        targetSpec: item.targetSpec || null,
+        message: summarizeApiError(error),
+        details: error?.payload?.details || error?.payload || null
+      };
+      failures.push(failure);
+      state.imageJobs[index] = {
+        ...state.imageJobs[index],
+        status: "error",
+        message: failure.message
+      };
+      state.latestImageResult = { ok: false, model, size, mode: Array.from(modes).join(","), images, failures, image: images[0] || {}, account };
+      state.latestImageStatus = `第 ${index + 1}/${priorityPrompts.length} 张生成失败：${item.label}`;
+      renderOutputs();
+    }
+  }
 
-  const fulfilled = settled.filter((item) => item.status === "fulfilled").map((item) => item.value);
-  const rejected = settled.filter((item) => item.status === "rejected").map((item) => item.reason);
-  const images = fulfilled.flatMap((item) => item.images || (item.image ? [item.image] : []));
-  const failures = [
-    ...fulfilled.flatMap((item) => item.failures || []),
-    ...rejected.map((error, index) => ({
-      type: priorityPrompts[index]?.type || "image",
-      label: priorityPrompts[index]?.label || "图片",
-      message: summarizeApiError(error),
-      details: error?.payload?.details || error?.payload || null
-    }))
-  ];
-
-  if (!images.length && rejected.length) {
+  if (!images.length && failures.length) {
     const error = new Error(failures[0]?.message || "图片 API 请求失败");
     error.payload = {
       error: "IMAGE_GENERATION_FAILED",
@@ -1484,13 +1589,13 @@ async function requestRemoteImage(pack) {
 
   return {
     ok: true,
-    model: fulfilled[0]?.model || "gpt-image-2",
-    size: fulfilled[0]?.size || selectedSizeProfile.apiSize || "1024x1024",
-    mode: [...new Set(fulfilled.map((item) => item.mode).filter(Boolean))].join(","),
+    model,
+    size,
+    mode: Array.from(modes).join(","),
     images,
     failures,
     image: images[0] || {},
-    account: fulfilled.find((item) => item.account)?.account || null
+    account
   };
 }
 
@@ -1745,7 +1850,7 @@ els.generateBtn.addEventListener("click", async () => {
   if (imageSettled.status === "fulfilled") {
     const imageData = imageSettled.value;
     state.latestImageResult = imageData;
-    state.latestImageStatus = `真实图片已返回，模型：${imageData.model || "gpt-image-2"}，规格：${imageData.size || "1024x1024"}`;
+    state.latestImageStatus = `图片队列完成：成功 ${imageData.images?.length || 0} 张，失败 ${imageData.failures?.length || 0} 张，模型：${imageData.model || "gpt-image-2"}`;
     generatedSomething = true;
   } else {
     const error = imageSettled.reason || {};
@@ -1790,6 +1895,7 @@ els.resetBtn.addEventListener("click", () => {
   state.latestRemoteStatus = "";
   state.latestImageResult = null;
   state.latestImageStatus = "";
+  state.imageJobs = [];
   renderPreviews([]);
   renderOutputs();
   activateTab("brief");
