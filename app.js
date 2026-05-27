@@ -245,6 +245,13 @@ const defaultAccounts = [
   }
 ];
 
+const localFallbackCredentials = {
+  admin: "admin123",
+  "creative-a": "design123",
+  "ops-b": "ops123",
+  "review-c": "review123"
+};
+
 const defaultUsageLogs = [
   {
     id: "log-001",
@@ -332,6 +339,7 @@ const els = {
   loadDraftBtn: document.querySelector("#loadDraftBtn"),
   copyBtn: document.querySelector("#copyBtn"),
   resetBtn: document.querySelector("#resetBtn"),
+  workspacePage: document.querySelector("#workspacePage"),
   briefOutput: document.querySelector("#briefOutput"),
   imageOutput: document.querySelector("#imageOutput"),
   detailOutput: document.querySelector("#detailOutput"),
@@ -525,7 +533,9 @@ function renderSession() {
 }
 
 function authenticate(username, password) {
-  return null;
+  const account = state.accounts.find((item) => item.username === username);
+  if (!account || account.status !== "active") return null;
+  return localFallbackCredentials[account.username] === password ? account : null;
 }
 
 async function authenticateRemote(username, password) {
@@ -1925,15 +1935,18 @@ function renderPreviews(files) {
 }
 
 function activateTab(target) {
-  els.tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === target));
-  document.querySelectorAll(".output").forEach((panel) => panel.classList.remove("active"));
+  const account = getCurrentAccount();
+  const safeTarget = target === "admin" && account?.role !== "owner" ? "workspace" : target;
+  document.querySelectorAll(".app-page").forEach((panel) => panel.classList.remove("active"));
   const targetPanel = {
+    workspace: els.workspacePage,
     brief: els.briefOutput,
     image: els.imageOutput,
     detail: els.detailOutput,
     api: els.apiOutput,
     admin: els.adminOutput
-  }[target];
+  }[safeTarget] || els.workspacePage;
+  els.tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === safeTarget));
   targetPanel.classList.add("active");
 }
 
@@ -2071,7 +2084,7 @@ els.logoutBtn.addEventListener("click", () => {
   state.authToken = "";
   state.cloudMode = false;
   persistAccountState();
-  activateTab("brief");
+  activateTab("workspace");
   renderSession();
 });
 

@@ -26,7 +26,54 @@
     </section>
 
     <main class="app-shell is-hidden" id="appShell">
-      <section class="workspace">
+      <aside class="side-nav" aria-label="功能导航">
+        <div class="brand-card">
+          <p class="eyebrow">VISION BRZAZIL</p>
+          <h2>Commerce Studio</h2>
+          <p>从产品图、竞品链接到巴西本土化视觉，一条清晰工作流完成主图与详情页。</p>
+        </div>
+
+        <nav class="tabs vertical-tabs" role="tablist" aria-label="功能切换">
+          <button class="tab active" data-tab="workspace" type="button">
+            <span>01</span>
+            <b>工作流输入</b>
+            <small>图片 / 链接 / 关键词</small>
+          </button>
+          <button class="tab" data-tab="brief" type="button">
+            <span>02</span>
+            <b>链接拆解</b>
+            <small>美国设计方向 + 巴西本土化</small>
+          </button>
+          <button class="tab" data-tab="image" type="button">
+            <span>03</span>
+            <b>图片生成</b>
+            <small>整套主图与卖点图</small>
+          </button>
+          <button class="tab" data-tab="detail" type="button">
+            <span>04</span>
+            <b>详情页</b>
+            <small>平台尺寸与模块文案</small>
+          </button>
+          <button class="tab" data-tab="api" type="button">
+            <span>05</span>
+            <b>模型接口</b>
+            <small>ChatGPT 5.5 优先</small>
+          </button>
+          <button class="tab" data-tab="admin" type="button" id="adminTab">
+            <span>06</span>
+            <b>Dashboard</b>
+            <small>账号用量与管理</small>
+          </button>
+        </nav>
+
+        <div class="nav-note">
+          <b>Brazil-first output</b>
+          <span>产品外观以上传图片为准，美国链接定设计，巴西链接定语言和场景。</span>
+        </div>
+      </aside>
+
+      <section class="main-stage" aria-label="功能页面">
+      <section class="workspace app-page active" id="workspacePage">
         <header class="topbar">
           <div>
             <p class="eyebrow">VISION BRZAZIL</p>
@@ -182,21 +229,12 @@
         </section>
       </section>
 
-      <aside class="output-panel" aria-label="输出区">
-        <div class="tabs" role="tablist">
-          <button class="tab active" data-tab="brief" type="button">链接拆解</button>
-          <button class="tab" data-tab="image" type="button">图片提示词</button>
-          <button class="tab" data-tab="detail" type="button">详情页</button>
-          <button class="tab" data-tab="api" type="button">模型接口</button>
-          <button class="tab" data-tab="admin" type="button" id="adminTab">Dashboard</button>
-        </div>
-
-        <section class="output active" id="briefOutput"></section>
-        <section class="output" id="imageOutput"></section>
-        <section class="output" id="detailOutput"></section>
-        <section class="output" id="apiOutput"></section>
-        <section class="output" id="adminOutput"></section>
-      </aside>
+        <section class="output app-page" id="briefOutput"></section>
+        <section class="output app-page" id="imageOutput"></section>
+        <section class="output app-page" id="detailOutput"></section>
+        <section class="output app-page" id="apiOutput"></section>
+        <section class="output app-page" id="adminOutput"></section>
+      </section>
     </main>
 
     <script src="./app.js"></script>

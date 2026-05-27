@@ -110,31 +110,94 @@ select {
 
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1.02fr) minmax(420px, 0.98fr);
-  gap: 22px;
+  grid-template-columns: 292px minmax(0, 1fr);
+  gap: 24px;
   min-height: 100vh;
-  padding: 22px;
+  padding: 24px;
 }
 
-.workspace,
-.output-panel {
-  background: rgba(255, 250, 255, 0.9);
+.side-nav {
+  position: sticky;
+  top: 24px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 16px;
+  height: calc(100vh - 48px);
+  min-height: 680px;
+  padding: 18px;
+  color: #fffaff;
+  background:
+    radial-gradient(circle at 16% 10%, rgba(236, 72, 153, 0.32), transparent 34%),
+    radial-gradient(circle at 92% 18%, rgba(167, 139, 250, 0.34), transparent 30%),
+    linear-gradient(155deg, #1c102f, #351466 58%, #1f1730);
+  border: 1px solid rgba(255, 250, 255, 0.18);
+  border-radius: 30px;
+  box-shadow: 0 28px 80px rgba(31, 23, 48, 0.3);
+  overflow: hidden;
+}
+
+.side-nav::after {
+  content: "";
+  position: absolute;
+  inset: auto -70px -90px auto;
+  width: 210px;
+  height: 210px;
+  border-radius: 50%;
+  background: rgba(219, 39, 119, 0.26);
+  filter: blur(6px);
+}
+
+.brand-card,
+.nav-note,
+.vertical-tabs {
+  position: relative;
+  z-index: 1;
+}
+
+.brand-card {
+  padding: 8px 8px 12px;
+}
+
+.brand-card .eyebrow {
+  color: #d8b4fe;
+}
+
+.brand-card h2 {
+  margin: 0;
+  font-size: 29px;
+  line-height: 1.04;
+  letter-spacing: -0.04em;
+}
+
+.brand-card p {
+  margin: 12px 0 0;
+  color: rgba(255, 250, 255, 0.7);
+  line-height: 1.55;
+  font-size: 13px;
+}
+
+.main-stage {
+  min-width: 0;
+}
+
+.app-page {
+  display: none;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(255, 250, 255, 0.86)),
+    rgba(255, 250, 255, 0.9);
   border: 1px solid rgba(216, 207, 232, 0.95);
+  border-radius: 30px;
   box-shadow: var(--shadow);
 }
 
 .workspace {
-  display: grid;
   grid-template-rows: auto auto auto;
   gap: 18px;
-  padding: 24px;
+  padding: 28px;
 }
 
-.output-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: calc(100vh - 44px);
-  overflow: hidden;
+.workspace.app-page.active {
+  display: grid;
 }
 
 .topbar {
@@ -502,28 +565,99 @@ button:disabled {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  border-bottom: 1px solid var(--line);
-  background: #ebe3f6;
+}
+
+.vertical-tabs {
+  align-content: start;
+  gap: 8px;
+  padding: 4px;
 }
 
 .tab {
-  border: 0;
-  border-right: 1px solid var(--line);
-  background: transparent;
-  color: var(--muted);
-  padding: 13px 8px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 70px;
+  border: 1px solid rgba(255, 250, 255, 0.1);
+  border-radius: 20px;
+  background: rgba(255, 250, 255, 0.06);
+  color: rgba(255, 250, 255, 0.68);
+  padding: 12px;
+  text-align: left;
+  transition:
+    transform 160ms ease,
+    background 160ms ease,
+    border-color 160ms ease;
+}
+
+.tab:hover {
+  transform: translateX(3px);
+  background: rgba(255, 250, 255, 0.1);
+}
+
+.tab span {
+  grid-row: span 2;
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 14px;
+  background: rgba(255, 250, 255, 0.1);
+  color: #e9d5ff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.tab b {
+  color: #fffaff;
+  font-size: 14px;
+}
+
+.tab small {
+  color: rgba(255, 250, 255, 0.58);
+  line-height: 1.25;
 }
 
 .tab.active {
-  background: var(--panel);
-  color: var(--ink);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.22), rgba(216, 180, 254, 0.14)),
+    rgba(255, 250, 255, 0.12);
+  border-color: rgba(255, 250, 255, 0.32);
+  color: #fffaff;
+  box-shadow: 0 16px 40px rgba(14, 9, 28, 0.24);
+}
+
+.tab.active span {
+  background: #fffaff;
+  color: var(--accent-dark);
+}
+
+.nav-note {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid rgba(255, 250, 255, 0.16);
+  border-radius: 22px;
+  background: rgba(255, 250, 255, 0.08);
+}
+
+.nav-note b {
+  font-size: 13px;
+}
+
+.nav-note span {
+  color: rgba(255, 250, 255, 0.66);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .output {
   display: none;
   overflow: auto;
-  padding: 22px;
+  min-height: calc(100vh - 48px);
+  padding: 30px;
 }
 
 .output.active {
@@ -1166,7 +1300,18 @@ mark {
     grid-template-columns: 1fr;
   }
 
-  .output-panel {
+  .side-nav {
+    position: relative;
+    top: auto;
+    height: auto;
+    min-height: 0;
+  }
+
+  .vertical-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .output {
     min-height: 620px;
   }
 }
@@ -1174,6 +1319,12 @@ mark {
 @media (max-width: 640px) {
   .app-shell {
     padding: 12px;
+    gap: 12px;
+  }
+
+  .side-nav,
+  .app-page {
+    border-radius: 22px;
   }
 
   .workspace {
@@ -1196,8 +1347,16 @@ mark {
     display: grid;
   }
 
-  .tabs {
-    grid-template-columns: repeat(2, 1fr);
+  .vertical-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .tab {
+    min-height: 62px;
+  }
+
+  .output {
+    padding: 18px;
   }
 
   .account-bar,
