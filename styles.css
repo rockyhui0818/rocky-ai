@@ -1012,6 +1012,47 @@ button:disabled {
   color: #4f435f;
 }
 
+.analysis-section {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  background:
+    linear-gradient(135deg, rgba(124, 58, 237, 0.07), transparent 44%),
+    rgba(255, 255, 255, 0.88);
+  padding: 14px;
+  margin: 10px 0;
+}
+
+.analysis-section > b {
+  color: var(--accent-dark);
+  font-size: 15px;
+}
+
+.analysis-section p {
+  margin: 0;
+}
+
+.analysis-object,
+.analysis-list {
+  display: grid;
+  gap: 8px;
+}
+
+.analysis-object article,
+.analysis-list > div {
+  border: 1px solid var(--line);
+  background: rgba(255, 250, 255, 0.72);
+  padding: 10px;
+}
+
+.analysis-object span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--accent-dark);
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .keyword-review {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

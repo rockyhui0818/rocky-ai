@@ -1,8 +1,9 @@
 const { createToken, publicAccount, sha256 } = require("../_lib/auth");
-const { readJson, sendJson } = require("../_lib/http");
+const { handleOptions, readJson, sendJson } = require("../_lib/http");
 const { filter, supabaseRequest } = require("../_lib/supabase");
 
 module.exports = async function handler(req, res) {
+  if (handleOptions(req, res)) return;
   if (req.method !== "POST") return sendJson(res, 405, { error: "METHOD_NOT_ALLOWED" });
 
   try {

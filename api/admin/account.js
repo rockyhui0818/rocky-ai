@@ -1,8 +1,9 @@
 const { getAccountByToken, publicAccount, sha256 } = require("../_lib/auth");
-const { getBearerToken, readJson, sendJson } = require("../_lib/http");
+const { getBearerToken, handleOptions, readJson, sendJson } = require("../_lib/http");
 const { filter, supabaseRequest } = require("../_lib/supabase");
 
 module.exports = async function handler(req, res) {
+  if (handleOptions(req, res)) return;
   try {
     const currentAccount = await getAccountByToken(getBearerToken(req));
     if (!currentAccount || currentAccount.role !== "owner") {

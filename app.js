@@ -252,6 +252,8 @@ const localFallbackCredentials = {
   "review-c": "review123"
 };
 
+const PUBLIC_API_BASE_URL = "https://rocky-ai-khaki.vercel.app";
+
 const defaultUsageLogs = [
   {
     id: "log-001",
@@ -395,8 +397,41 @@ function persistAccountState() {
   }
 }
 
+function getConfiguredApiBase() {
+  const runtimeBase = window.VISION_BRZAZIL_API_BASE_URL || localStorage.getItem("visionBrzazil.apiBaseUrl") || PUBLIC_API_BASE_URL;
+  return String(runtimeBase || "").replace(/\/$/, "");
+}
+
+function isStaticPagesHost() {
+  return location.hostname.endsWith("github.io");
+}
+
+function resolveApiUrl(path) {
+  const apiBase = getConfiguredApiBase();
+  if (apiBase) return `${apiBase}${path}`;
+  return path;
+}
+
+function createStaticApiError(path) {
+  const error = new Error("当前页面运行在 GitHub Pages 静态站，无法直接调用 /api 后端。请配置 Vercel 后端地址后再生成图片。");
+  error.status = 405;
+  error.payload = {
+    error: "STATIC_HOST_API_UNAVAILABLE",
+    message: error.message,
+    details: {
+      requested_path: path,
+      current_host: location.hostname,
+      fix: "部署 Vercel 后端，并在 app.js 的 PUBLIC_API_BASE_URL 或 window.VISION_BRZAZIL_API_BASE_URL 中填写后端域名。"
+    }
+  };
+  return error;
+}
+
 async function apiRequest(path, options = {}) {
-  const response = await fetch(path, {
+  if (isStaticPagesHost() && path.startsWith("/api/") && !getConfiguredApiBase()) {
+    throw createStaticApiError(path);
+  }
+  const response = await fetch(resolveApiUrl(path), {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -959,6 +994,7 @@ function renderOutputs() {
     <p>${escapeHtml(pack.urlInfo.slugTerms.join(" · ") || "未解析到有效路径词")}</p>
     <h3>逐条链接分析</h3>
     <div class="link-analysis-list">${renderLinkAnalysis(pack.urlInfo.links)}</div>
+    ${renderModelLinkDeconstruction()}
     <h3>主图与详情页方向</h3>
     <div class="direction-grid">
       <div><b>产品图基准</b><span>上传图片决定产品外观、颜色、材质、比例、配件和包装；链接不能改变产品本体。</span></div>
@@ -1259,6 +1295,62 @@ function renderLinkAnalysis(links) {
     .join("");
 }
 
+function renderModelLinkDeconstruction() {
+  const result = state.latestRemoteResult;
+  if (!result || typeof result !== "object") {
+    return `
+      <h3>模型深度拆解</h3>
+      <p>点击“开始自动生成”后，这里会显示模型返回的美国链接设计拆解、巴西链接本土化拆解和最终映射逻辑。</p>
+    `;
+  }
+
+  const sections = [
+    ["link_analysis", "多链接拆解"],
+    ["us_visual_deconstruction", "美国链接主图/详情页设计拆解"],
+    ["br_visual_deconstruction", "巴西链接本土化拆解"],
+    ["localization_map", "本土化映射逻辑"],
+    ["keywords", "模型关键词判断"],
+    ["image_prompts", "模型图片提示词"]
+  ]
+    .map(([key, label]) => renderAnalysisSection(label, result[key]))
+    .filter(Boolean)
+    .join("");
+
+  return `
+    <h3>模型深度拆解</h3>
+    ${sections || `<p>模型已返回，但没有包含链接拆解字段。你可以在“模型接口”页查看完整原始 JSON。</p>`}
+  `;
+}
+
+function renderAnalysisSection(label, value) {
+  if (value === undefined || value === null || value === "") return "";
+  return `
+    <section class="analysis-section">
+      <b>${escapeHtml(label)}</b>
+      ${renderAnalysisValue(value)}
+    </section>
+  `;
+}
+
+function renderAnalysisValue(value) {
+  if (Array.isArray(value)) {
+    return `<div class="analysis-list">${value.map((item) => `<div>${renderAnalysisValue(item)}</div>`).join("")}</div>`;
+  }
+  if (value && typeof value === "object") {
+    return `
+      <div class="analysis-object">
+        ${Object.entries(value).map(([key, item]) => `
+          <article>
+            <span>${escapeHtml(formatDetailKey(key))}</span>
+            ${renderAnalysisValue(item)}
+          </article>
+        `).join("")}
+      </div>
+    `;
+  }
+  return `<p>${escapeHtml(String(value))}</p>`;
+}
+
 function renderAdminOutput(pack = buildPromptPack()) {
   const currentAccount = getCurrentAccount();
   if (!currentAccount || currentAccount.role !== "owner") {
@@ -1525,7 +1617,10 @@ function buildApiDraft(pack) {
 }
 
 async function requestRemoteGeneration(pack) {
-  const response = await fetch("/api/generate", {
+  if (isStaticPagesHost() && !getConfiguredApiBase()) {
+    throw createStaticApiError("/api/generate");
+  }
+  const response = await fetch(resolveApiUrl("/api/generate"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

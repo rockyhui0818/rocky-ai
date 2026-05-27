@@ -1,5 +1,24 @@
+function applyCors(req, res) {
+  const origin = req.headers.origin || "*";
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Max-Age", "86400");
+}
+
+function handleOptions(req, res) {
+  applyCors(req, res);
+  if (req.method !== "OPTIONS") return false;
+  res.statusCode = 204;
+  res.end();
+  return true;
+}
+
 function sendJson(res, statusCode, payload) {
   res.statusCode = statusCode;
+  res.setHeader("Access-Control-Allow-Origin", res.getHeader("Access-Control-Allow-Origin") || "*");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
   res.end(JSON.stringify(payload));
@@ -26,7 +45,9 @@ function getBearerToken(req) {
 }
 
 module.exports = {
+  applyCors,
   getBearerToken,
+  handleOptions,
   methodNotAllowed,
   readJson,
   sendJson

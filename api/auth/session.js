@@ -1,7 +1,8 @@
 const { getAccountByToken, publicAccount } = require("../_lib/auth");
-const { getBearerToken, sendJson } = require("../_lib/http");
+const { getBearerToken, handleOptions, sendJson } = require("../_lib/http");
 
 module.exports = async function handler(req, res) {
+  if (handleOptions(req, res)) return;
   if (req.method !== "GET") return sendJson(res, 405, { error: "METHOD_NOT_ALLOWED" });
 
   try {
