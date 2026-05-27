@@ -294,6 +294,19 @@ h1 {
   align-items: start;
 }
 
+.prompt-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.prompt-editor-grid textarea {
+  min-height: 170px;
+  background:
+    linear-gradient(135deg, rgba(124, 58, 237, 0.05), transparent 45%),
+    white;
+}
+
 .action-card {
   background:
     linear-gradient(135deg, rgba(76, 29, 149, 0.14), rgba(219, 39, 119, 0.08)),
@@ -1170,6 +1183,7 @@ mark {
   .topbar,
   .header-actions,
   .form-grid,
+  .prompt-editor-grid,
   .workflow-rail {
     grid-template-columns: 1fr;
   }

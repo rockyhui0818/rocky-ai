@@ -89,16 +89,25 @@ function isRetryableProviderError(error) {
   );
 }
 
-async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceImage }) {
-  const referenceBlob = dataUrlToBlob(referenceImage);
+function appendReferenceImages(form, blobs) {
+  blobs.forEach((blob, index) => {
+    form.append("image", blob, `product-reference-${index + 1}.jpg`);
+  });
+}
+
+async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceImage, referenceImages }) {
+  const referenceBlobs = (Array.isArray(referenceImages) && referenceImages.length ? referenceImages : [referenceImage])
+    .map(dataUrlToBlob)
+    .filter(Boolean)
+    .slice(0, 4);
   let editFailure = null;
-  if (referenceBlob) {
+  if (referenceBlobs.length) {
     const form = new FormData();
     form.append("model", model);
     form.append("prompt", prompt);
     form.append("size", size);
     form.append("response_format", "b64_json");
-    form.append("image", referenceBlob, "product-reference.png");
+    appendReferenceImages(form, referenceBlobs);
     const editResponse = await fetch(`${baseUrl}/images/edits`, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` },
@@ -108,13 +117,42 @@ async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceIma
     if (editResponse.ok) {
       return { data: editData, mode: "reference-edit" };
     }
-    editFailure = {
-      endpoint: "/images/edits",
-      status: editResponse.status,
-      message: getProviderMessage(editData, editRawText, "Reference image edit request failed."),
-      details: editData,
-      raw: cleanProviderText(editRawText)
-    };
+
+    if (referenceBlobs.length > 1) {
+      const singleForm = new FormData();
+      singleForm.append("model", model);
+      singleForm.append("prompt", prompt);
+      singleForm.append("size", size);
+      singleForm.append("response_format", "b64_json");
+      appendReferenceImages(singleForm, referenceBlobs.slice(0, 1));
+      const singleResponse = await fetch(`${baseUrl}/images/edits`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: singleForm
+      });
+      const { data: singleData, rawText: singleRawText } = await readProviderPayload(singleResponse);
+      if (singleResponse.ok) {
+        return { data: singleData, mode: "reference-edit-single-fallback" };
+      }
+      editFailure = {
+        endpoint: "/images/edits",
+        status: singleResponse.status,
+        message: getProviderMessage(singleData, singleRawText, "Reference image edit request failed."),
+        details: {
+          multi_reference_failure: editData,
+          single_reference_failure: singleData
+        },
+        raw: cleanProviderText(singleRawText) || cleanProviderText(editRawText)
+      };
+    } else {
+      editFailure = {
+        endpoint: "/images/edits",
+        status: editResponse.status,
+        message: getProviderMessage(editData, editRawText, "Reference image edit request failed."),
+        details: editData,
+        raw: cleanProviderText(editRawText)
+      };
+    }
   }
 
   const response = await fetch(`${baseUrl}/images/generations`, {
@@ -172,7 +210,10 @@ module.exports = async function handler(req, res) {
     const prompt = String(payload.prompt || "").trim();
     const size = payload.size || "1024x1024";
     if (!prompt) return sendJson(res, 400, { error: "PROMPT_REQUIRED", message: "Image prompt is required." });
-    const referenceBytes = estimateBytes(payload.reference_image);
+    const referenceImages = Array.isArray(payload.reference_images) ? payload.reference_images.slice(0, 4) : [];
+    const referenceBytes = referenceImages.length
+      ? referenceImages.reduce((sum, item) => sum + estimateBytes(item), 0)
+      : estimateBytes(payload.reference_image);
     if (referenceBytes > 900000) {
       return sendJson(res, 413, {
         error: "REFERENCE_IMAGE_TOO_LARGE",
@@ -209,7 +250,8 @@ module.exports = async function handler(req, res) {
             model,
             prompt: finalPrompt,
             size,
-            referenceImage: payload.reference_image
+            referenceImage: payload.reference_image,
+            referenceImages
           });
         } catch (firstError) {
           if (!isRetryableProviderError(firstError)) throw firstError;
@@ -219,7 +261,8 @@ module.exports = async function handler(req, res) {
             model,
             prompt: finalPrompt,
             size,
-            referenceImage: payload.reference_image
+            referenceImage: payload.reference_image,
+            referenceImages
           });
         }
         modes.add(result.mode);

@@ -325,6 +325,8 @@ const els = {
   modelProvider: document.querySelector("#modelProvider"),
   sellingPoints: document.querySelector("#sellingPoints"),
   manualKeywords: document.querySelector("#manualKeywords"),
+  customImagePrompt: document.querySelector("#customImagePrompt"),
+  customDetailPrompt: document.querySelector("#customDetailPrompt"),
   generateBtn: document.querySelector("#generateBtn"),
   saveDraftBtn: document.querySelector("#saveDraftBtn"),
   loadDraftBtn: document.querySelector("#loadDraftBtn"),
@@ -771,7 +773,7 @@ function buildPromptPack() {
   const keywords = manualKeywords.length ? manualKeywords : autoKeywords;
   const imageCount = Math.max(state.images.length, 1);
 
-  const imagePrompt = [
+  const autoImagePrompt = [
     `角色：你是巴西电商视觉总监和葡语转化文案专家。`,
     `模型优先级：默认第一优先级使用 ChatGPT 5.5 Pro 最高级模型（API 模型标识：gpt-5.5）进行链接拆解、关键词判断、图片提示词和详情页生成；其他 API 仅作为备用或人工指定。`,
     `最高优先级：上传的 ${imageCount} 张产品图片是唯一产品外观基准。必须保持产品形状、颜色、材质、结构、尺寸比例、配件、包装和可见细节；链接内容只用于卖点和市场策略，绝不能替代或改写产品本体。`,
@@ -790,7 +792,7 @@ function buildPromptPack() {
     `负面提示词：different product, changed color, changed material, wrong shape, wrong packaging, missing accessory, extra accessories not included, blurry, distorted product, wrong logo, watermark, unreadable text, fake discount badge, medical claim, exaggerated guarantee.`
   ].join("\n");
 
-  const detailPrompt = [
+  const autoDetailPrompt = [
     `模型优先级：默认第一优先级使用 ChatGPT 5.5 Pro 最高级模型（API 模型标识：gpt-5.5）；其他 API 仅作为备用或人工指定。`,
     `请为 ${platform.label} 生成巴西葡萄牙语商品详情页。`,
     `产品事实来源优先级：1 上传产品图片，2 用户填写卖点和规格，3 美国链接竞品卖点，4 巴西链接本土化表达。不得编造上传图中不存在的配件、材质、认证或功能。`,
@@ -801,6 +803,10 @@ function buildPromptPack() {
     `关键词自然融入：${keywords.join(", ") || "根据产品类型自动补全"}`,
     `中文运营备注：指出哪些内容适合主图，哪些适合详情页，哪些词应避免。`
   ].join("\n");
+  const customImagePrompt = els.customImagePrompt?.value.trim() || "";
+  const customDetailPrompt = els.customDetailPrompt?.value.trim() || "";
+  const imagePrompt = customImagePrompt || autoImagePrompt;
+  const detailPrompt = customDetailPrompt || autoDetailPrompt;
 
   return {
     urlInfo,
@@ -811,6 +817,10 @@ function buildPromptPack() {
     autoKeywords,
     manualKeywords,
     keywords,
+    autoImagePrompt,
+    autoDetailPrompt,
+    customImagePrompt,
+    customDetailPrompt,
     imagePrompt,
     detailPrompt
   };
@@ -854,7 +864,7 @@ function getWorkflowState(pack) {
       step: "01",
       title: "产品图基准",
       status: state.images.length ? "ready" : "pending",
-      note: state.images.length ? `${state.images.length} 张产品图已上传，第一张作为主视觉基准。` : "请先上传产品图，否则生图只能按文字猜测。"
+      note: state.images.length ? `${state.images.length} 张产品图已上传，最多 4 张会作为多角度视觉参考。` : "请先上传产品图，否则生图只能按文字猜测。"
     },
     {
       step: "02",
@@ -891,9 +901,25 @@ function renderWorkflowState(items) {
   `;
 }
 
+function syncPromptEditors(pack) {
+  [
+    { element: els.customImagePrompt, autoValue: pack.autoImagePrompt },
+    { element: els.customDetailPrompt, autoValue: pack.autoDetailPrompt }
+  ].forEach(({ element, autoValue }) => {
+    if (!element) return;
+    const isEditing = document.activeElement === element;
+    const isManual = element.dataset.manual === "true";
+    if (!isEditing && !isManual) {
+      element.value = autoValue || "";
+      element.dataset.autoValue = autoValue || "";
+    }
+  });
+}
+
 function renderOutputs() {
   if (!getCurrentAccount()) return;
   const pack = buildPromptPack();
+  syncPromptEditors(pack);
   renderAccountControls(pack);
   state.latestPrompt = `${pack.imagePrompt}\n\n--- DETAILS ---\n${pack.detailPrompt}`;
   const workflow = getWorkflowState(pack);
@@ -934,6 +960,7 @@ function renderOutputs() {
     <h2>图片生成提示词</h2>
     ${renderImageResult()}
     <div class="prompt-block">${escapeHtml(pack.imagePrompt)}</div>
+    <p>${pack.customImagePrompt ? "当前使用人工修改后的图片提示词。" : "当前使用系统根据链接自动生成的图片提示词，可在左侧定制提示词中修改。"}</p>
     <h3>建议出图队列</h3>
     <ol>
       <li>白底主图：只展示产品本体，清晰、无文字、无水印。</li>
@@ -950,6 +977,7 @@ function renderOutputs() {
     ${renderGeneratedDetail()}
     <h3>详情页生成提示词</h3>
     <div class="prompt-block">${escapeHtml(pack.detailPrompt)}</div>
+    <p>${pack.customDetailPrompt ? "当前使用人工修改后的详情页提示词。" : "当前使用系统根据链接自动生成的详情页提示词，可在左侧定制提示词中修改。"}</p>
     <h3>葡语详情页骨架</h3>
     ${renderDetailSkeleton(pack)}
   `;
@@ -997,7 +1025,7 @@ function renderImageResult() {
     <section class="generated-section">
       <h3>真实生成图片</h3>
       <p>${escapeHtml(state.latestImageStatus || "图片 API 已返回")} · ${escapeHtml(sizeSummary)}</p>
-      ${state.referenceImageInfo ? `<p class="reference-compress-note">参考图已压缩用于 API：${escapeHtml(state.referenceImageInfo.width)}x${escapeHtml(state.referenceImageInfo.height)} · ${escapeHtml(formatBytes(state.referenceImageInfo.bytes))}，产品外观仍作为生成基准。</p>` : ""}
+      ${state.referenceImageInfo ? `<p class="reference-compress-note">参考图已压缩用于 API：${escapeHtml(state.referenceImageInfo.count || 1)} 张 · ${escapeHtml(state.referenceImageInfo.summary || `${state.referenceImageInfo.width}x${state.referenceImageInfo.height}`)} · 合计 ${escapeHtml(formatBytes(state.referenceImageInfo.bytes))}，产品外观仍作为生成基准。</p>` : ""}
       ${state.imageJobs.length ? renderImageJobProgress() : ""}
       ${failures.length ? renderImageFailures(failures) : ""}
       ${imageItems.length ? `<div class="generated-image-grid">${imageItems.map(renderGeneratedImageItem).join("")}</div>` : ""}
@@ -1515,17 +1543,18 @@ function getRemoteTokenUsage(remoteData) {
 }
 
 async function requestRemoteImage(pack) {
-  const referenceImage = await getReferenceImageDataUrl();
+  const referenceImages = await getReferenceImageDataUrls();
   const selectedSizeProfile = getSelectedImageSizeProfile();
   const basePayload = {
     prompt: `${pack.productName} marketplace image`,
-    reference_image: referenceImage,
+    reference_image: referenceImages[0] || "",
+    reference_images: referenceImages,
     platform: els.platform.value,
     size: selectedSizeProfile.apiSize || "1024x1024",
     max_images: 1,
-    units: referenceImage ? 2 : 1
+    units: referenceImages.length ? Math.min(4, referenceImages.length + 1) : 1
   };
-  const priorityPrompts = buildImagePromptQueue(pack).slice(0, 2);
+  const priorityPrompts = buildImagePromptQueue(pack);
   state.imageJobs = priorityPrompts.map((item) => ({
     type: item.type,
     label: item.label,
@@ -1669,6 +1698,7 @@ function withTargetSpec(type, label, brief) {
 function buildImagePromptQueue(pack) {
   const consistency = [
     `产品：${pack.productName}`,
+    `用户最终定制提示词：${pack.imagePrompt}`,
     `最高优先级：上传产品图片是唯一视觉基准。必须严格保持参考图中的产品外观、颜色、材质、结构、比例、配件、包装和可见细节。`,
     `美国链接只用于拆解卖点、设计层级、主图构图和详情页模块；巴西链接只用于本土化需求、葡语表达和信任要素。`,
     `不要把链接里的竞品外观、颜色、包装或品牌带入生成结果。不要生成不同品类、不同颜色、不同包装或额外配件。`,
@@ -1719,15 +1749,30 @@ function buildImagePromptQueue(pack) {
   ];
 }
 
-function getReferenceImageDataUrl() {
-  const firstImage = state.images[0]?.file;
-  if (!firstImage) return Promise.resolve("");
+async function getReferenceImageDataUrls() {
+  const files = state.images.slice(0, 4).map((image) => image.file).filter(Boolean);
+  if (!files.length) {
+    state.referenceImageInfo = null;
+    return [];
+  }
+  const compressed = (await Promise.all(files.map((file) => compressReferenceImage(file)))).filter(Boolean);
+  const totalBytes = compressed.reduce((sum, item) => sum + item.bytes, 0);
+  state.referenceImageInfo = {
+    count: compressed.length,
+    bytes: totalBytes,
+    summary: compressed.map((item) => `${item.width}x${item.height}`).join(" / ")
+  };
+  return compressed.map((item) => item.dataUrl);
+}
+
+function compressReferenceImage(file) {
+  if (!file) return Promise.resolve(null);
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
       img.onload = () => {
-        const maxSide = 768;
+        const maxSide = 640;
         const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
         const width = Math.max(1, Math.round(img.width * scale));
         const height = Math.max(1, Math.round(img.height * scale));
@@ -1738,22 +1783,19 @@ function getReferenceImageDataUrl() {
         context.fillStyle = "#ffffff";
         context.fillRect(0, 0, width, height);
         context.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
-        state.referenceImageInfo = {
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.66);
+        resolve({
+          dataUrl,
           width,
           height,
           bytes: Math.round((dataUrl.length * 3) / 4)
-        };
-        resolve(dataUrl);
+        });
       };
-      img.onerror = () => {
-        state.referenceImageInfo = null;
-        resolve(String(reader.result || ""));
-      };
+      img.onerror = () => resolve(null);
       img.src = String(reader.result || "");
     };
-    reader.onerror = () => resolve("");
-    reader.readAsDataURL(firstImage);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
   });
 }
 
@@ -1971,6 +2013,14 @@ els.resetBtn.addEventListener("click", () => {
   els.productName.value = "";
   els.sellingPoints.value = "";
   els.manualKeywords.value = "";
+  if (els.customImagePrompt) {
+    els.customImagePrompt.value = "";
+    els.customImagePrompt.dataset.manual = "false";
+  }
+  if (els.customDetailPrompt) {
+    els.customDetailPrompt.value = "";
+    els.customDetailPrompt.dataset.manual = "false";
+  }
   els.imageInput.value = "";
   state.latestRemoteResult = null;
   state.latestRemoteStatus = "";
@@ -2179,6 +2229,8 @@ function collectDraft() {
     productUrl: els.productUrl.value,
     sellingPoints: els.sellingPoints.value,
     manualKeywords: els.manualKeywords.value,
+    customImagePrompt: els.customImagePrompt?.value || "",
+    customDetailPrompt: els.customDetailPrompt?.value || "",
     savedAt: new Date().toISOString()
   };
 }
@@ -2209,6 +2261,14 @@ function loadDraft() {
   els.productUrl.value = draft.productUrl || "";
   els.sellingPoints.value = draft.sellingPoints || "";
   els.manualKeywords.value = draft.manualKeywords || "";
+  if (els.customImagePrompt) {
+    els.customImagePrompt.value = draft.customImagePrompt || "";
+    els.customImagePrompt.dataset.manual = draft.customImagePrompt ? "true" : "false";
+  }
+  if (els.customDetailPrompt) {
+    els.customDetailPrompt.value = draft.customDetailPrompt || "";
+    els.customDetailPrompt.dataset.manual = draft.customDetailPrompt ? "true" : "false";
+  }
   renderOutputs();
   activateTab("brief");
   els.loadDraftBtn.textContent = "草稿已载入";
@@ -2225,8 +2285,11 @@ function getVisibleUsageLogs() {
 }
 
 ["input", "change"].forEach((eventName) => {
-  [els.productUrl, els.productName, els.platform, els.modelProvider, els.sellingPoints, els.manualKeywords].forEach((element) => {
+  [els.productUrl, els.productName, els.platform, els.modelProvider, els.sellingPoints, els.manualKeywords, els.customImagePrompt, els.customDetailPrompt].filter(Boolean).forEach((element) => {
     element.addEventListener(eventName, () => {
+      if (element === els.customImagePrompt || element === els.customDetailPrompt) {
+        element.dataset.manual = element.value.trim() ? "true" : "false";
+      }
       renderOutputs();
       maybeRecordEditEvent(element);
     });
@@ -2236,7 +2299,7 @@ function getVisibleUsageLogs() {
 function maybeRecordEditEvent(element) {
   if (!getCurrentAccount()) return;
   const now = Date.now();
-  const isTextField = element === els.productUrl || element === els.productName || element === els.sellingPoints;
+  const isTextField = element === els.productUrl || element === els.productName || element === els.sellingPoints || element === els.customImagePrompt || element === els.customDetailPrompt;
   if (!isTextField || now - state.lastEditLoggedAt < 12000) return;
   state.lastEditLoggedAt = now;
   recordAuditEvent("edit", "修改商品输入");
