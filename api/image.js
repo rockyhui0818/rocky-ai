@@ -44,15 +44,33 @@ function cleanProviderText(value) {
 
 function getProviderMessage(data, rawText, fallback) {
   const error = data?.error;
-  return (
+  return readableProviderMessage(
     error?.message ||
     error?.error?.message ||
-    (typeof error === "string" ? error : "") ||
+    error ||
     data?.message ||
     data?.detail ||
     cleanProviderText(rawText) ||
     fallback
   );
+}
+
+function readableProviderMessage(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value === "[object Object]" ? "" : value;
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.map(readableProviderMessage).filter(Boolean).join("；");
+  if (typeof value === "object") {
+    const direct = value.message || value.error?.message || value.error || value.detail || value.code || value.type;
+    const directText = readableProviderMessage(direct);
+    if (directText) return directText;
+    try {
+      return JSON.stringify(value).slice(0, 700);
+    } catch {
+      return "";
+    }
+  }
+  return String(value);
 }
 
 function isRetryableProviderError(error) {

@@ -434,7 +434,25 @@ function summarizeApiError(error) {
     providerDetails.provider_raw,
     payload.message,
     payload.error
-  ].filter(Boolean).find((item) => String(item).trim()) || "请检查 API 配置或稍后重试。";
+  ].map(readableErrorText).filter(Boolean).find((item) => String(item).trim()) || "请检查 API 配置或稍后重试。";
+}
+
+function readableErrorText(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value === "[object Object]" ? "" : value;
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.map(readableErrorText).filter(Boolean).join("；");
+  if (typeof value === "object") {
+    const direct = value.message || value.error?.message || value.error || value.detail || value.code || value.type;
+    const directText = readableErrorText(direct);
+    if (directText) return directText;
+    try {
+      return JSON.stringify(value).slice(0, 700);
+    } catch {
+      return "";
+    }
+  }
+  return String(value);
 }
 
 function getCurrentAccount() {
@@ -990,14 +1008,16 @@ function renderImageResult() {
 }
 
 function renderImageJobProgress() {
-  const doneCount = state.imageJobs.filter((job) => job.status === "success").length;
+  const successCount = state.imageJobs.filter((job) => job.status === "success").length;
+  const errorCount = state.imageJobs.filter((job) => job.status === "error").length;
+  const processedCount = successCount + errorCount;
   const activeIndex = state.imageJobs.findIndex((job) => job.status === "running");
-  const percent = state.imageJobs.length ? Math.round((doneCount / state.imageJobs.length) * 100) : 0;
+  const percent = state.imageJobs.length ? Math.round((processedCount / state.imageJobs.length) * 100) : 0;
   return `
     <div class="image-progress-panel">
       <div class="progress-heading">
         <b>逐张生成进度</b>
-        <span>${doneCount}/${state.imageJobs.length} 已完成${activeIndex >= 0 ? ` · 正在生成第 ${activeIndex + 1} 张` : ""}</span>
+        <span>${successCount} 张成功 · ${errorCount} 张失败 · ${processedCount}/${state.imageJobs.length} 已处理${activeIndex >= 0 ? ` · 正在生成第 ${activeIndex + 1} 张` : ""}</span>
       </div>
       <div class="progress-track"><span style="width:${percent}%"></span></div>
       <div class="image-job-list">
@@ -1662,14 +1682,39 @@ function buildImagePromptQueue(pack) {
       `${consistency}\n生成一张平台合规白底主图：产品居中，高清真实摄影，无文字、无水印、无 logo，优先满足目标平台的上传尺寸和裁切规则。`
     ),
     withTargetSpec(
+      "infographic",
+      "卖点信息图",
+      `${consistency}\n生成一张独立卖点信息图：主要参考美国链接的主图卖点表达和信息层级；保持产品主体一致，加入少量巴西葡语短卖点和清晰指示线，移动端可读，背景干净。关键词：${pack.keywords.slice(0, 8).join(", ")}。`
+    ),
+    withTargetSpec(
+      "lifestyle",
+      "巴西场景主图",
+      `${consistency}\n生成一张独立巴西本土生活场景图：主构图参考美国链接里的使用场景和视觉方向，但场景换成本土化巴西家庭、办公室、出行或日常环境；产品外观必须来自上传图，光线自然。`
+    ),
+    withTargetSpec(
+      "detail",
+      "尺寸细节图",
+      `${consistency}\n生成一张独立尺寸与细节图：参考美国链接的细节展示方式，突出材质、接口、尺寸、包装内容或关键结构；产品必须与上传图一致，葡语标注简洁清晰。`
+    ),
+    withTargetSpec(
       "detail-benefits",
       "详情页卖点模块图",
       `${consistency}\n生成一张独立详情页卖点模块图：主要参考美国链接里的详情页模块结构、视觉层级、卖点排序和设计方向，但产品外观必须来自上传图；巴西链接只用于把短句、本土场景和信任表达本地化。展示产品、3 个核心 beneficio、简洁葡语短句、干净高级背景。`
     ),
     withTargetSpec(
-      "infographic",
-      "卖点信息图",
-      `${consistency}\n生成一张独立卖点信息图：主要参考美国链接的主图卖点表达和信息层级；保持产品主体一致，加入少量巴西葡语短卖点和清晰指示线，移动端可读，背景干净。关键词：${pack.keywords.slice(0, 8).join(", ")}。`
+      "detail-usage",
+      "详情页使用步骤图",
+      `${consistency}\n生成一张独立详情页使用步骤图：参考美国链接的步骤模块结构，转化为巴西葡语 modo de uso，使用本土化场景表达；产品外观必须与上传图一致，不要拼成合集。`
+    ),
+    withTargetSpec(
+      "detail-comparison",
+      "详情页对比模块图",
+      `${consistency}\n生成一张独立详情页对比模块图：参考美国链接的对比逻辑，突出本产品相对普通方案的优势，但不出现竞品品牌、不攻击竞品；产品外观必须来自上传图。`
+    ),
+    withTargetSpec(
+      "detail-package",
+      "包装清单模块图",
+      `${consistency}\n生成一张独立包装清单或规格模块图：展示实际包含内容、规格参数和注意事项；不得添加上传图和用户描述中不存在的配件，葡语短句本土化。`
     )
   ];
 }
