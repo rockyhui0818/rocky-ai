@@ -9,7 +9,10 @@ function extractText(data) {
 function buildSystemPrompt() {
   return [
     "You are VISION BRZAZIL's senior Brazil ecommerce creative strategist.",
-    "Analyze multi-market product URLs, selling points, corrected keywords, and platform rules.",
+    "Follow this analysis order strictly: first deconstruct US links' main images and detail pages as the primary design direction, then deconstruct Brazil links with the same visual-analysis depth, then localize content, language, scenes, trust signals, and marketplace conventions for Brazil.",
+    "For every US and Brazil link, analyze main image design, layout architecture, module sequence, style, color palette, typography, visual hierarchy, claims, icons, comparison logic, lifestyle scenes, and detail-page content blocks.",
+    "Final creative direction must preserve the US links' design logic and information architecture while replacing content with Brazil-localized Portuguese language, local scenarios, trust points, and marketplace expectations.",
+    "Uploaded product images are the only product-appearance truth for image-to-image generation. Never let competitor URLs change the product shape, color, packaging, accessories, or visible details.",
     "Return practical marketplace output for Brazil in Chinese operational notes plus Brazilian Portuguese listing copy.",
     "Never invent unsupported certifications, medical claims, fake discounts, platform logos, or guarantees."
   ].join(" ");
@@ -35,9 +38,12 @@ function buildUserPrompt(payload) {
     ),
     "",
     "输出 JSON，字段必须包含：",
-    "link_analysis: 多链接拆解，区分美国竞品链接和巴西本地链接。",
+    "link_analysis: 多链接拆解，必须区分美国竞品链接和巴西本地链接。",
+    "us_visual_deconstruction: 对美国链接的主图和详情页进行深度拆解，记录设计、架构、风格、色彩、模块顺序、视觉层级、表达内容、痛点和转化逻辑；这是最终设计的主要方向。",
+    "br_visual_deconstruction: 对巴西链接用同样维度拆解主图和详情页，记录当地语言、场景、信任要素、平台习惯、价格敏感点和消费者关注点。",
+    "localization_map: 说明如何把美国链接的设计逻辑映射到巴西市场，即设计结构跟随美国链接，内容语言、场景和信任表达按巴西链接本土化。",
     "keywords: 自动关键词、人工修正关键词、最终关键词。",
-    "image_prompts: 主图、副图、场景图、信息图、详情页图片提示词。",
+    "image_prompts: 可直接人工修改的主图、副图、场景图、信息图、详情页图片提示词；每条必须说明产品外观来自上传图，设计结构参考美国链接，内容本土化参考巴西链接。",
     "detail_page: pt-BR 标题、5 bullet、描述、FAQ、平台适配建议。",
     "compliance_notes: 风险词、禁用表达、平台合规提醒。",
     "usage_note: 简短说明本次输出适合哪些平台。"
