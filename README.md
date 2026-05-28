@@ -28,6 +28,7 @@
 - `OPENAI_BASE_URL`: OpenAI 兼容接口地址，默认 `https://api.openai.com/v1`
 - `OPENAI_TEXT_MODEL`: 文本生成模型，默认 `gpt-5.5`
 - `OPENAI_REASONING_EFFORT`: 文本模型推理强度，默认 `high`；如果第三方兼容接口不支持该参数，后端会自动降级重试
+- `OPENAI_MAX_COMPLETION_TOKENS`: 链接分析最大输出长度，默认 `1800`，用于加快返回速度
 - `SUPABASE_URL`: Supabase Project URL
 - `SUPABASE_SERVICE_ROLE_KEY`: Supabase service_role key，仅放后端环境变量，不能暴露到前端
 - `SESSION_SECRET`: 任意长随机字符串，用于签发登录 token

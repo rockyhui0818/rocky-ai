@@ -8,6 +8,7 @@ const MAX_SCAN_LINKS = 6;
 const MAX_IMAGE_CANDIDATES = 8;
 const MAX_HEADINGS = 10;
 const PAGE_TEXT_SAMPLE_LENGTH = 900;
+const DEFAULT_MAX_COMPLETION_TOKENS = 1800;
 
 function extractText(data) {
   return data?.choices?.[0]?.message?.content || data?.output_text || data?.content?.[0]?.text || "";
@@ -175,7 +176,8 @@ function buildModelBody({ model, payload, includeReasoning = true }) {
       { role: "system", content: buildSystemPrompt() },
       { role: "user", content: buildUserPrompt(payload) }
     ],
-    response_format: { type: "json_object" }
+    response_format: { type: "json_object" },
+    max_tokens: Number(process.env.OPENAI_MAX_COMPLETION_TOKENS || DEFAULT_MAX_COMPLETION_TOKENS)
   };
 
   if (includeReasoning) {
@@ -195,6 +197,54 @@ function isUnsupportedReasoningError(response, data) {
       message.includes("unknown parameter") ||
       message.includes("unrecognized request argument"))
   );
+}
+
+function isUnsupportedMaxTokensError(response, data) {
+  if (response.ok) return false;
+  const message = String(data?.error?.message || data?.message || data?.rawText || "").toLowerCase();
+  return (
+    response.status === 400 &&
+    (message.includes("max_tokens") ||
+      message.includes("max_completion_tokens") ||
+      message.includes("unsupported parameter") ||
+      message.includes("unknown parameter") ||
+      message.includes("unrecognized request argument"))
+  );
+}
+
+async function requestModelWithFallback({ baseUrl, apiKey, model, payload }) {
+  const url = `${baseUrl}/chat/completions`;
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json"
+  };
+  const request = (body) =>
+    fetchModelJson(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body)
+    });
+
+  let usedReasoningEffort = process.env.OPENAI_REASONING_EFFORT || "high";
+  let usedMaxTokens = Number(process.env.OPENAI_MAX_COMPLETION_TOKENS || DEFAULT_MAX_COMPLETION_TOKENS);
+  let body = buildModelBody({ model, payload, includeReasoning: true });
+  let result = await request(body);
+
+  if (isUnsupportedMaxTokensError(result.response, result.data)) {
+    body = { ...body };
+    delete body.max_tokens;
+    usedMaxTokens = null;
+    result = await request(body);
+  }
+
+  if (isUnsupportedReasoningError(result.response, result.data)) {
+    body = buildModelBody({ model, payload, includeReasoning: false });
+    if (usedMaxTokens === null) delete body.max_tokens;
+    result = await request(body);
+    usedReasoningEffort = "provider-unsupported";
+  }
+
+  return { ...result, usedReasoningEffort, usedMaxTokens };
 }
 
 async function fetchModelJson(url, options) {
@@ -225,7 +275,7 @@ async function fetchModelJson(url, options) {
 function buildSystemPrompt() {
   return [
     "You are VISION BRZAZIL's senior Brazil ecommerce creative strategist.",
-    "Prioritize speed and evidence density. Produce concise but actionable JSON; avoid long prose, repeated explanations, and decorative language.",
+    "Prioritize speed and evidence density. Produce concise minified JSON; avoid long prose, repeated explanations, markdown, and decorative language.",
     "Before creating prompts, use the provided link_scan_results as observed evidence from downloaded product pages. Treat image_candidates, alt text, headings, descriptions, and page text as the concrete scan of product main images and detail-page assets.",
     "Follow this analysis order strictly: first deconstruct US links' main images and detail pages as the primary design direction, then deconstruct Brazil links with the same visual-analysis depth, then localize content, language, scenes, trust signals, and marketplace conventions for Brazil.",
     "For every US and Brazil link, analyze main image design, layout architecture, module sequence, style, color palette, typography, visual hierarchy, claims, icons, comparison logic, lifestyle scenes, and detail-page content blocks.",
@@ -258,15 +308,15 @@ function buildUserPrompt(payload) {
     "",
     "输出 JSON，字段必须包含：",
     "速度要求：输出要短而完整，优先让前端快速拿到链接分析、可编辑关键词和生图提示词；不要写长篇报告。",
-    "link_analysis: 数组，每条链接 3-5 个证据点，必须区分 US/Brazil，包含标题、描述摘要、主图/详情页图片候选摘要、页面模块证据。",
-    "us_visual_deconstruction: 6-8 条要点，记录美国链接的设计架构、模块顺序、风格、色彩、视觉层级、转化逻辑；这是最终设计主方向。",
-    "br_visual_deconstruction: 6-8 条要点，记录巴西链接的本土语言、场景、信任要素、消费者关注点和平台习惯。",
-    "localization_map: 5-7 条映射规则，说明设计结构跟随美国链接，内容语言、场景和信任表达按巴西链接本土化。",
-    "keywords: {auto: 最多12个, manual: 用户人工词, final: 最多16个}。",
-    "final_prompt_strategy: 5-7 条提示词策略，强调产品外观只以上传图为准。",
-    "image_prompts: 生成 8 条可编辑提示词，覆盖主图、副图、场景图、信息图、对比图、尺寸/功能图、详情页顶部、详情页模块；每条 80-140 字，必须包含构图、背景、文案位置、产品一致性约束。",
-    "detail_page: {title_pt_br, bullets_pt_br: 5条以内, description_pt_br: 500字以内, faq_pt_br: 3条以内, platform_notes: 5条以内}。",
-    "compliance_notes: 最多8条风险词、禁用表达、平台合规提醒。",
+    "link_analysis: 数组，每条链接最多3个证据点，必须区分 US/Brazil，包含标题、描述摘要、图片候选摘要、页面模块证据。",
+    "us_visual_deconstruction: 5条要点，记录美国链接的设计架构、模块顺序、风格、色彩、转化逻辑；这是最终设计主方向。",
+    "br_visual_deconstruction: 5条要点，记录巴西链接的本土语言、场景、信任要素、消费者关注点和平台习惯。",
+    "localization_map: 5条映射规则，说明设计结构跟随美国链接，内容语言、场景和信任表达按巴西链接本土化。",
+    "keywords: {auto: 最多10个, manual: 用户人工词, final: 最多12个}。",
+    "final_prompt_strategy: 5条提示词策略，强调产品外观只以上传图为准。",
+    "image_prompts: 生成 6 条可编辑提示词，覆盖主图、副图、场景图、信息图、详情页顶部、详情页模块；每条 60-100 字，必须包含构图、背景、文案位置、产品一致性约束。",
+    "detail_page: {title_pt_br, bullets_pt_br: 5条以内, description_pt_br: 260字以内, faq_pt_br: 3条以内, platform_notes: 4条以内}。",
+    "compliance_notes: 最多6条风险词、禁用表达、平台合规提醒。",
     "usage_note: 一句话说明适合哪些平台。"
   ].join("\n");
 }
@@ -293,27 +343,12 @@ module.exports = async function handler(req, res) {
     const payload = await readJson(req);
     payload.link_scan_results = await scanProductLinks(payload);
     const account = await getAccountByToken(getBearerToken(req)).catch(() => null);
-    let { response, data } = await fetchModelJson(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(buildModelBody({ model, payload, includeReasoning: true }))
+    const { response, data, usedReasoningEffort, usedMaxTokens } = await requestModelWithFallback({
+      baseUrl,
+      apiKey,
+      model,
+      payload
     });
-
-    let usedReasoningEffort = process.env.OPENAI_REASONING_EFFORT || "high";
-    if (isUnsupportedReasoningError(response, data)) {
-      ({ response, data } = await fetchModelJson(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(buildModelBody({ model, payload, includeReasoning: false }))
-      }));
-      usedReasoningEffort = "provider-unsupported";
-    }
 
     if (!response.ok) {
       return sendJson(res, response.status, {
@@ -364,6 +399,7 @@ module.exports = async function handler(req, res) {
       ok: true,
       model,
       reasoning_effort: usedReasoningEffort,
+      max_tokens: usedMaxTokens,
       usage: data.usage || null,
       account: publicAccount(updatedAccount),
       result: parsed && typeof parsed === "object" ? { ...parsed, link_scan_results: payload.link_scan_results } : parsed,
