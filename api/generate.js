@@ -225,6 +225,7 @@ async function fetchModelJson(url, options) {
 function buildSystemPrompt() {
   return [
     "You are VISION BRZAZIL's senior Brazil ecommerce creative strategist.",
+    "Prioritize speed and evidence density. Produce concise but actionable JSON; avoid long prose, repeated explanations, and decorative language.",
     "Before creating prompts, use the provided link_scan_results as observed evidence from downloaded product pages. Treat image_candidates, alt text, headings, descriptions, and page text as the concrete scan of product main images and detail-page assets.",
     "Follow this analysis order strictly: first deconstruct US links' main images and detail pages as the primary design direction, then deconstruct Brazil links with the same visual-analysis depth, then localize content, language, scenes, trust signals, and marketplace conventions for Brazil.",
     "For every US and Brazil link, analyze main image design, layout architecture, module sequence, style, color palette, typography, visual hierarchy, claims, icons, comparison logic, lifestyle scenes, and detail-page content blocks.",
@@ -256,16 +257,17 @@ function buildUserPrompt(payload) {
     ),
     "",
     "输出 JSON，字段必须包含：",
-    "link_analysis: 多链接拆解，必须区分美国竞品链接和巴西本地链接，并逐条列出扫描到的标题、描述、主图/详情页图片候选、图片 alt、页面模块和可用证据。",
-    "us_visual_deconstruction: 对美国链接扫描到的主图和详情页图片/页面结构进行深度拆解，记录设计、架构、风格、色彩、模块顺序、视觉层级、表达内容、痛点和转化逻辑；这是最终设计的主要方向。",
-    "br_visual_deconstruction: 对巴西链接扫描到的主图和详情页图片/页面结构用同样维度拆解，记录当地语言、场景、信任要素、平台习惯、价格敏感点和消费者关注点。",
-    "localization_map: 说明如何把美国链接的设计逻辑映射到巴西市场，即设计结构跟随美国链接，内容语言、场景和信任表达按巴西链接本土化。",
-    "keywords: 自动关键词、人工修正关键词、最终关键词。",
-    "final_prompt_strategy: 综合美国设计方向、巴西本土化、上传产品图限制后，说明最终提示词策略。",
-    "image_prompts: 可直接人工修改的主图、副图、场景图、信息图、详情页图片提示词；每条必须具体说明构图、背景、色彩、文案位置、模块结构、产品一致性约束，并说明产品外观来自上传图，设计结构参考美国链接，内容本土化参考巴西链接。",
-    "detail_page: pt-BR 标题、5 bullet、描述、FAQ、平台适配建议。",
-    "compliance_notes: 风险词、禁用表达、平台合规提醒。",
-    "usage_note: 简短说明本次输出适合哪些平台。"
+    "速度要求：输出要短而完整，优先让前端快速拿到链接分析、可编辑关键词和生图提示词；不要写长篇报告。",
+    "link_analysis: 数组，每条链接 3-5 个证据点，必须区分 US/Brazil，包含标题、描述摘要、主图/详情页图片候选摘要、页面模块证据。",
+    "us_visual_deconstruction: 6-8 条要点，记录美国链接的设计架构、模块顺序、风格、色彩、视觉层级、转化逻辑；这是最终设计主方向。",
+    "br_visual_deconstruction: 6-8 条要点，记录巴西链接的本土语言、场景、信任要素、消费者关注点和平台习惯。",
+    "localization_map: 5-7 条映射规则，说明设计结构跟随美国链接，内容语言、场景和信任表达按巴西链接本土化。",
+    "keywords: {auto: 最多12个, manual: 用户人工词, final: 最多16个}。",
+    "final_prompt_strategy: 5-7 条提示词策略，强调产品外观只以上传图为准。",
+    "image_prompts: 生成 8 条可编辑提示词，覆盖主图、副图、场景图、信息图、对比图、尺寸/功能图、详情页顶部、详情页模块；每条 80-140 字，必须包含构图、背景、文案位置、产品一致性约束。",
+    "detail_page: {title_pt_br, bullets_pt_br: 5条以内, description_pt_br: 500字以内, faq_pt_br: 3条以内, platform_notes: 5条以内}。",
+    "compliance_notes: 最多8条风险词、禁用表达、平台合规提醒。",
+    "usage_note: 一句话说明适合哪些平台。"
   ].join("\n");
 }
 
