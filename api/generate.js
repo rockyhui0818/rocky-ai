@@ -9,7 +9,7 @@ const MAX_IMAGE_CANDIDATES = 8;
 const MAX_HEADINGS = 10;
 const PAGE_TEXT_SAMPLE_LENGTH = 900;
 const DEFAULT_MAX_COMPLETION_TOKENS = 900;
-const DEFAULT_SYNTHESIS_MAX_TOKENS = 2400;
+const DEFAULT_SYNTHESIS_MAX_TOKENS = 1600;
 const LISTING_IMAGE_TYPES = [
   "white_main",
   "lifestyle",
@@ -299,8 +299,8 @@ function buildSynthesisPrompt(payload, analyses) {
     "main_image_plan: 必须包含 white_main,lifestyle,infographic,details_specs,comparison 五类图片方向。",
     "detail_page_plan: 必须包含 hero_banner,core_features,lifestyle_usage,details_specs,faq,comparison_chart 六个详情页模块方向。",
     "keywords: {auto: 最多8个, manual: 用户人工词, final: 最多10个}。",
-    "image_prompts: 生成 11 条可编辑提示词对象；字段 {type,label,source_logic,br_localization,prompt}；前5条对应主图/附图类型，后6条对应详情页模块。",
-    "每条 prompt 必须以图生图逻辑写：上传产品图是唯一产品外观基准；美国链接提供构图/模块/风格；巴西链接提供葡语、本土场景和信任表达。",
+    "image_prompts: 生成 11 条简洁可编辑提示词对象；字段 {type,label,source_logic,br_localization,prompt}；前5条对应主图/附图类型，后6条对应详情页模块。",
+    "每条 prompt 控制在 45-75 字：上传产品图是唯一产品外观基准；美国链接提供构图/模块/风格；巴西链接提供葡语、本土场景和信任表达。",
     "detail_page: {title_pt_br, bullets_pt_br: 5条以内, description_pt_br: 180字以内, faq_pt_br: 2条以内, platform_notes: 3条以内}。",
     "compliance_notes: 最多4条。",
     "usage_note: 一句话。",
@@ -313,6 +313,64 @@ function buildSynthesisPrompt(payload, analyses) {
       analyses
     })
   ].join("\n");
+}
+
+function fallbackSegmentedResult(payload, analysisFlow, analysisMeta) {
+  const product = compactProduct(payload.product || {});
+  const manual = product.manual_keyword_overrides ? product.manual_keyword_overrides.split(/[,，\s]+/).filter(Boolean) : [];
+  const auto = [
+    product.name,
+    "produto leve",
+    "produto durável",
+    "uso diário",
+    "prático",
+    "resistente"
+  ].filter(Boolean).slice(0, 8);
+  const imagePrompts = [
+    ["white_main", "白底主图", "白底、产品居中、无文字无水印，清晰展示产品本体。"],
+    ["lifestyle", "巴西场景图", "巴西家庭、办公室、出行或户外场景，突出真实使用。"],
+    ["infographic", "葡语卖点信息图", "用葡语短句表达 3-5 个强卖点，指向真实可见部位。"],
+    ["details_specs", "尺寸细节图", "展示材质、接口、容量、规格或包装内容，不虚构参数。"],
+    ["comparison", "优势对比图", "与普通方案对比优势，不出现竞品品牌或攻击性表达。"],
+    ["hero_banner", "详情页顶部视觉海报", "全宽 Hero 海报，产品和核心口号建立第一印象。"],
+    ["core_features", "详情页核心卖点", "大图加侧边文字或网格拆解 3-4 个核心卖点。"],
+    ["lifestyle_usage", "详情页生活方式", "真实使用场景建立代入感，突出产品调性与审美。"],
+    ["details_specs", "详情页细节技术说明", "微距细节、规格、使用方法和注意事项，降低退货率。"],
+    ["faq", "详情页 FAQ", "回答使用步骤、适用人群、材质或注意事项。"],
+    ["comparison_chart", "详情页产品线对比", "同品牌产品线表格对比，促进交叉销售。"]
+  ].map(([type, label, prompt]) => ({
+    type,
+    label,
+    source_logic: "没有可用链接证据时使用平台通用高转化结构。",
+    br_localization: "使用巴西葡语短句和本土日常场景。",
+    prompt: `图生图：上传产品图为唯一外观基准，严格保持产品颜色、结构、材质和比例。${prompt}`
+  }));
+
+  return {
+    analysis_flow: analysisFlow,
+    analysis_meta: analysisMeta,
+    workflow_analysis: {
+      us_main: "无美国链接证据，使用通用商品图结构。",
+      br_main: "无巴西链接证据，采用巴西葡语与日常场景本土化。",
+      us_detail: "无美国详情页证据，使用标准 A+ 模块结构。",
+      br_detail: "无巴西详情页证据，采用本土语言、场景和信任表达。",
+      optimization_logic: "有链接时优先按美国设计结构和巴西本土化落地；无链接时使用保守通用模板。"
+    },
+    link_analysis: [],
+    main_image_plan: LISTING_IMAGE_TYPES,
+    detail_page_plan: DETAIL_MODULE_TYPES,
+    keywords: { auto, manual, final: Array.from(new Set([...manual, ...auto])).slice(0, 10) },
+    image_prompts: imagePrompts,
+    detail_page: {
+      title_pt_br: product.name || "Produto prático para uso diário",
+      bullets_pt_br: ["Visual fiel ao produto real.", "Ideal para uso diário.", "Design prático e resistente.", "Conteúdo claro e objetivo.", "Fotos pensadas para marketplace."],
+      description_pt_br: "Página otimizada para apresentar o produto com imagens claras, benefícios diretos e linguagem adequada ao consumidor brasileiro.",
+      faq_pt_br: ["Como usar? Siga as instruções do produto.", "O que vem incluso? Consulte as imagens e descrição do anúncio."],
+      platform_notes: ["Evitar claims sem comprovação.", "Não usar logos de plataforma.", "Manter texto curto e legível."]
+    },
+    compliance_notes: ["Não inventar certificações.", "Não copiar marca concorrente.", "Não alterar aparência do produto.", "Evitar promessas absolutas."],
+    usage_note: "Adequado para Amazon, Mercado Livre, TikTok Shop e Shopee com ajustes de dimensão."
+  };
 }
 
 function buildModelBody({ model, messages, includeReasoning = true, maxTokens = DEFAULT_MAX_COMPLETION_TOKENS }) {
@@ -515,6 +573,16 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
     reasoning_effort: value.reasoning_effort,
     max_tokens: value.max_tokens
   }]));
+
+  if (!usScans.length && !brScans.length) {
+    return {
+      result: fallbackSegmentedResult(payload, analyses, analysisMeta),
+      usage: {},
+      reasoning_effort: "skipped-no-links",
+      max_tokens: 0
+    };
+  }
+
   const synthesis = await runJsonTask({
     baseUrl,
     apiKey,
