@@ -428,18 +428,42 @@ function createStaticApiError(path) {
   return error;
 }
 
+function createNetworkApiError(path, error) {
+  const apiBase = getConfiguredApiBase();
+  const message = apiBase
+    ? `无法连接后端 API：${apiBase}${path}。链接扫描和模型拆解没有执行，请检查 Vercel 域名是否可访问、项目是否公开、网络是否能连接 Vercel。`
+    : `无法连接后端 API：${path}。`;
+  const wrapped = new Error(message);
+  wrapped.status = 0;
+  wrapped.payload = {
+    error: "API_NETWORK_FAILED",
+    message,
+    details: {
+      requested_path: path,
+      api_base: apiBase || location.origin,
+      original_message: error?.message || String(error || "")
+    }
+  };
+  return wrapped;
+}
+
 async function apiRequest(path, options = {}) {
   if (isStaticPagesHost() && path.startsWith("/api/") && !getConfiguredApiBase()) {
     throw createStaticApiError(path);
   }
-  const response = await fetch(resolveApiUrl(path), {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {}),
-      ...(options.headers || {})
-    }
-  });
+  let response;
+  try {
+    response = await fetch(resolveApiUrl(path), {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {}),
+        ...(options.headers || {})
+      }
+    });
+  } catch (error) {
+    throw createNetworkApiError(path, error);
+  }
   const rawText = await response.text().catch(() => "");
   let data = {};
   try {
@@ -1735,21 +1759,26 @@ async function requestRemoteGeneration(pack) {
   if (isStaticPagesHost() && !getConfiguredApiBase()) {
     throw createStaticApiError("/api/generate");
   }
-  const response = await fetch(resolveApiUrl("/api/generate"), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {})
-    },
-    body: JSON.stringify({
-      ...buildApiDraft(pack),
-      platform_key: els.platform.value,
-      usage_estimate: {
-        units: estimateUsageUnits(pack),
-        tokens: estimateTokenUsage(pack)
-      }
-    })
-  });
+  let response;
+  try {
+    response = await fetch(resolveApiUrl("/api/generate"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {})
+      },
+      body: JSON.stringify({
+        ...buildApiDraft(pack),
+        platform_key: els.platform.value,
+        usage_estimate: {
+          units: estimateUsageUnits(pack),
+          tokens: estimateTokenUsage(pack)
+        }
+      })
+    });
+  } catch (error) {
+    throw createNetworkApiError("/api/generate", error);
+  }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -2204,8 +2233,14 @@ els.generateBtn.addEventListener("click", async () => {
     await new Promise((resolve) => setTimeout(resolve, 250));
   } catch (error) {
     state.latestRemoteResult = error.payload || { message: error.message };
-    state.latestRemoteStatus = "链接扫描/模型拆解失败，已回退为本地提示词生成模式。";
+    state.latestRemoteStatus = "链接扫描/模型拆解失败，已停止生成图片。当前没有调用模型分析链接，也不会使用本地提示词继续生图。";
+    state.latestImageResult = null;
+    state.latestImageStatus = "已停止：必须先完成链接扫描和模型拆解，才会开始生成图片。";
+    els.generateBtn.textContent = originalText;
+    els.generateBtn.disabled = false;
     renderOutputs();
+    activateTab("brief");
+    return;
   }
 
   els.generateBtn.textContent = "正在根据提示词逐张生成图片...";
