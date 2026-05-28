@@ -8,7 +8,8 @@ const MAX_SCAN_LINKS = 6;
 const MAX_IMAGE_CANDIDATES = 8;
 const MAX_HEADINGS = 10;
 const PAGE_TEXT_SAMPLE_LENGTH = 900;
-const DEFAULT_MAX_COMPLETION_TOKENS = 1800;
+const DEFAULT_MAX_COMPLETION_TOKENS = 900;
+const DEFAULT_SYNTHESIS_MAX_TOKENS = 1600;
 
 function extractText(data) {
   return data?.choices?.[0]?.message?.content || data?.output_text || data?.content?.[0]?.text || "";
@@ -169,15 +170,112 @@ function compactScanResult(item = {}) {
   };
 }
 
-function buildModelBody({ model, payload, includeReasoning = true }) {
+function isBrazilMarket(value) {
+  const text = JSON.stringify(value || "").toLowerCase();
+  return text.includes("brazil") || text.includes("brasil") || text.includes("mercado") || text.includes(".br") || text.includes("shopee");
+}
+
+function isUsMarket(value) {
+  const text = JSON.stringify(value || "").toLowerCase();
+  return text.includes("united states") || text.includes("usa") || text.includes("us") || text.includes(".com");
+}
+
+function marketBucket(scan = {}) {
+  if (isBrazilMarket(scan.market_hint) || isBrazilMarket(scan.url) || isBrazilMarket(scan.final_url)) return "brazil";
+  if (isUsMarket(scan.market_hint) || isUsMarket(scan.url) || isUsMarket(scan.final_url)) return "us";
+  return "other";
+}
+
+function splitScansByMarket(scanResults = []) {
+  const grouped = { us: [], brazil: [], other: [] };
+  for (const scan of scanResults.map(compactScanResult)) {
+    grouped[marketBucket(scan)].push(scan);
+  }
+  return grouped;
+}
+
+function imageEvidenceFor(scans = [], mode) {
+  return scans.map((scan) => ({
+    url: scan.url,
+    title: scan.title,
+    description: scan.description,
+    images: (scan.image_candidates || [])
+      .filter((image) => mode === "detail" ? /detail|a-plus|aplus|module|lifestyle|hero/i.test(`${image.type} ${image.src} ${image.alt}`) : true)
+      .slice(0, mode === "detail" ? 6 : 4),
+    headings: (scan.headings || []).slice(0, mode === "detail" ? 8 : 4),
+    text: mode === "detail" ? cleanText(scan.page_text_sample, 700) : cleanText(scan.page_text_sample, 320)
+  }));
+}
+
+function imageUrlsFor(scans = [], mode, limit = 6) {
+  const urls = [];
+  for (const scan of scans) {
+    for (const image of scan.image_candidates || []) {
+      const source = `${image.type} ${image.src} ${image.alt}`;
+      const isDetail = /detail|a-plus|aplus|module|lifestyle|hero/i.test(source);
+      if (mode === "detail" && !isDetail && urls.length >= 2) continue;
+      if (image.src && /^https?:\/\//i.test(image.src) && !urls.includes(image.src)) urls.push(image.src);
+      if (urls.length >= limit) return urls;
+    }
+  }
+  return urls;
+}
+
+function buildMainImageAnalysisPrompt({ market, scans, product, priorAnalysis }) {
+  return [
+    `任务：只分析 ${market} 链接的主图/商品首屏图片。`,
+    "优先直接观察随消息附带的 image_url 图片；如果图片无法读取，再使用 image_candidates 的 URL、alt、标题和页面摘要。",
+    "输出 JSON：{market,main_image_analysis:[最多5条],visual_style:[最多4条],layout_rules:[最多4条],claims_or_text:[最多4条],usable_image_refs:[最多4项]}。",
+    market === "US" ? "美国链接是最终主图设计方向，重点记录构图、背景、产品摆放、视觉层级、色彩和转化表达。" : "巴西链接只用于本土化，重点记录葡语表达、生活场景、信任元素和当地审美。",
+    priorAnalysis ? "参考美国主图分析，只记录巴西本土化差异和可优化点，不重复美国内容。" : "",
+    "产品外观最终必须以上传产品图为准，链接图片只参考设计逻辑。",
+    JSON.stringify({ product: compactProduct(product), prior_analysis: priorAnalysis || null, evidence: imageEvidenceFor(scans, "main") })
+  ].join("\n");
+}
+
+function buildDetailPageAnalysisPrompt({ market, scans, product, priorAnalysis }) {
+  return [
+    `任务：只分析 ${market} 链接的详情页/A+模块/长图结构。`,
+    "优先直接观察随消息附带的 image_url 图片；如果图片无法读取，再使用 image_candidates、headings 和 page_text_sample。",
+    "输出 JSON：{market,detail_page_analysis:[最多6条],module_sequence:[最多6条],copy_angles:[最多5条],visual_blocks:[最多5条],usable_image_refs:[最多5项]}。",
+    market === "US" ? "美国链接是详情页设计结构主方向，重点记录模块顺序、版式、信息层级和视觉节奏。" : "巴西链接用于本土化，重点记录葡语、当地场景、信任表达、消费者关注点。",
+    priorAnalysis ? "参考美国详情页分析，只记录巴西本土化差异和可优化点，不重复美国内容。" : "",
+    "不要发明页面没有证据的认证、保修、折扣或平台背书。",
+    JSON.stringify({ product: compactProduct(product), prior_analysis: priorAnalysis || null, evidence: imageEvidenceFor(scans, "detail") })
+  ].join("\n");
+}
+
+function buildSynthesisPrompt(payload, analyses) {
+  return [
+    "任务：综合四个小分析结果，输出最终可编辑提示词。不要重新分析原始链接。",
+    "逻辑：主图 = 美国主图设计方向 + 巴西主图本土化；详情页 = 美国详情页结构 + 巴西详情页本土化；产品外观只以上传图为准。",
+    "输出 JSON 字段：",
+    "workflow_analysis: {us_main,br_main,us_detail,br_detail,optimization_logic}",
+    "link_analysis: 最多6项短证据摘要。",
+    "main_image_plan: 最多5条主图生成方向。",
+    "detail_page_plan: 最多5条详情页模块方向。",
+    "keywords: {auto: 最多8个, manual: 用户人工词, final: 最多10个}。",
+    "image_prompts: 生成 6 条可编辑提示词，分别覆盖主图、副图、场景图、信息图、详情页顶部、详情页模块；每条 60-100 字。",
+    "detail_page: {title_pt_br, bullets_pt_br: 5条以内, description_pt_br: 180字以内, faq_pt_br: 2条以内, platform_notes: 3条以内}。",
+    "compliance_notes: 最多4条。",
+    "usage_note: 一句话。",
+    JSON.stringify({
+      product: compactProduct(payload.product || {}),
+      platform: payload.platform,
+      assets: payload.assets,
+      constraints: payload.constraints,
+      prompt_pack: payload.prompts,
+      analyses
+    })
+  ].join("\n");
+}
+
+function buildModelBody({ model, messages, includeReasoning = true, maxTokens = DEFAULT_MAX_COMPLETION_TOKENS }) {
   const body = {
     model,
-    messages: [
-      { role: "system", content: buildSystemPrompt() },
-      { role: "user", content: buildUserPrompt(payload) }
-    ],
+    messages,
     response_format: { type: "json_object" },
-    max_tokens: Number(process.env.OPENAI_MAX_COMPLETION_TOKENS || DEFAULT_MAX_COMPLETION_TOKENS)
+    max_tokens: Number(maxTokens)
   };
 
   if (includeReasoning) {
@@ -212,7 +310,7 @@ function isUnsupportedMaxTokensError(response, data) {
   );
 }
 
-async function requestModelWithFallback({ baseUrl, apiKey, model, payload }) {
+async function requestModelWithFallback({ baseUrl, apiKey, model, messages, maxTokens = DEFAULT_MAX_COMPLETION_TOKENS }) {
   const url = `${baseUrl}/chat/completions`;
   const headers = {
     Authorization: `Bearer ${apiKey}`,
@@ -226,8 +324,8 @@ async function requestModelWithFallback({ baseUrl, apiKey, model, payload }) {
     });
 
   let usedReasoningEffort = process.env.OPENAI_REASONING_EFFORT || "high";
-  let usedMaxTokens = Number(process.env.OPENAI_MAX_COMPLETION_TOKENS || DEFAULT_MAX_COMPLETION_TOKENS);
-  let body = buildModelBody({ model, payload, includeReasoning: true });
+  let usedMaxTokens = Number(maxTokens);
+  let body = buildModelBody({ model, messages, includeReasoning: true, maxTokens });
   let result = await request(body);
 
   if (isUnsupportedMaxTokensError(result.response, result.data)) {
@@ -238,13 +336,142 @@ async function requestModelWithFallback({ baseUrl, apiKey, model, payload }) {
   }
 
   if (isUnsupportedReasoningError(result.response, result.data)) {
-    body = buildModelBody({ model, payload, includeReasoning: false });
+    body = buildModelBody({ model, messages, includeReasoning: false, maxTokens });
     if (usedMaxTokens === null) delete body.max_tokens;
     result = await request(body);
     usedReasoningEffort = "provider-unsupported";
   }
 
   return { ...result, usedReasoningEffort, usedMaxTokens };
+}
+
+function buildUserMessage(prompt, imageUrls = []) {
+  const images = imageUrls.filter(Boolean).slice(0, 6);
+  if (!images.length) return { role: "user", content: prompt };
+  return {
+    role: "user",
+    content: [
+      { type: "text", text: prompt },
+      ...images.map((url) => ({ type: "image_url", image_url: { url } }))
+    ]
+  };
+}
+
+function isUnsupportedVisionError(response, data) {
+  if (response.ok) return false;
+  const message = String(data?.error?.message || data?.message || data?.rawText || "").toLowerCase();
+  return (
+    response.status === 400 &&
+    (message.includes("image_url") ||
+      message.includes("content") ||
+      message.includes("multi-modal") ||
+      message.includes("multimodal") ||
+      message.includes("vision") ||
+      message.includes("unsupported"))
+  );
+}
+
+async function runJsonTask({ baseUrl, apiKey, model, prompt, maxTokens, imageUrls = [] }) {
+  const result = await requestModelWithFallback({
+    baseUrl,
+    apiKey,
+    model,
+    maxTokens,
+    messages: [
+      { role: "system", content: buildSystemPrompt() },
+      buildUserMessage(prompt, imageUrls)
+    ]
+  });
+
+  if (!result.response.ok && imageUrls.length && isUnsupportedVisionError(result.response, result.data)) {
+    return runJsonTask({ baseUrl, apiKey, model, prompt, maxTokens, imageUrls: [] });
+  }
+
+  if (!result.response.ok) {
+    const error = new Error(result.data?.error?.message || result.data?.message || result.data?.rawText || "The model provider returned an error.");
+    error.statusCode = result.response.status;
+    error.details = result.data;
+    throw error;
+  }
+
+  const text = extractText(result.data);
+  let parsed = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    parsed = null;
+  }
+
+  return {
+    result: parsed && typeof parsed === "object" ? parsed : { rawText: text },
+    usage: result.data.usage || null,
+    reasoning_effort: result.usedReasoningEffort,
+    max_tokens: result.usedMaxTokens
+  };
+}
+
+function sumUsage(usages = []) {
+  return usages.filter(Boolean).reduce((total, usage) => ({
+    prompt_tokens: Number(total.prompt_tokens || 0) + Number(usage.prompt_tokens || 0),
+    completion_tokens: Number(total.completion_tokens || 0) + Number(usage.completion_tokens || 0),
+    total_tokens: Number(total.total_tokens || 0) + Number(usage.total_tokens || 0)
+  }), {});
+}
+
+async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
+  const grouped = splitScansByMarket(payload.link_scan_results || []);
+  const usScans = grouped.us.length ? grouped.us : grouped.other;
+  const brScans = grouped.brazil;
+  const product = payload.product || {};
+  const settled = [];
+  const runStep = async (key, prompt, scans, mode) => {
+    try {
+      const value = await runJsonTask({
+        baseUrl,
+        apiKey,
+        model,
+        prompt,
+        maxTokens: 650,
+        imageUrls: imageUrlsFor(scans, mode, mode === "detail" ? 6 : 4)
+      });
+      settled.push([key, value]);
+      return value.result;
+    } catch (error) {
+      const fallback = { result: { error: error.message }, usage: null, reasoning_effort: process.env.OPENAI_REASONING_EFFORT || "high", max_tokens: 650 };
+      settled.push([key, fallback]);
+      return fallback.result;
+    }
+  };
+
+  const usMain = await runStep("us_main_image_analysis", buildMainImageAnalysisPrompt({ market: "US", scans: usScans, product }), usScans, "main");
+  await runStep("br_main_image_analysis", buildMainImageAnalysisPrompt({ market: "Brazil", scans: brScans, product, priorAnalysis: usMain }), brScans, "main");
+  const usDetail = await runStep("us_detail_page_analysis", buildDetailPageAnalysisPrompt({ market: "US", scans: usScans, product }), usScans, "detail");
+  await runStep("br_detail_page_analysis", buildDetailPageAnalysisPrompt({ market: "Brazil", scans: brScans, product, priorAnalysis: usDetail }), brScans, "detail");
+
+  const analyses = Object.fromEntries(settled.map(([key, value]) => [key, value.result]));
+  const analysisMeta = Object.fromEntries(settled.map(([key, value]) => [key, {
+    usage: value.usage,
+    reasoning_effort: value.reasoning_effort,
+    max_tokens: value.max_tokens
+  }]));
+  const synthesis = await runJsonTask({
+    baseUrl,
+    apiKey,
+    model,
+    prompt: buildSynthesisPrompt(payload, analyses),
+    maxTokens: Number(process.env.OPENAI_MAX_COMPLETION_TOKENS || DEFAULT_SYNTHESIS_MAX_TOKENS)
+  });
+
+  return {
+    result: {
+      analysis_flow: analyses,
+      analysis_meta: analysisMeta,
+      ...synthesis.result
+    },
+    usage: sumUsage([...settled.map(([, value]) => value.usage), synthesis.usage]),
+    reasoning_effort: synthesis.reasoning_effort,
+    max_tokens: synthesis.max_tokens
+  };
 }
 
 async function fetchModelJson(url, options) {
@@ -342,33 +569,17 @@ module.exports = async function handler(req, res) {
     const payload = await readJson(req);
     payload.link_scan_results = await scanProductLinks(payload);
     const account = await getAccountByToken(getBearerToken(req)).catch(() => null);
-    const { response, data, usedReasoningEffort, usedMaxTokens } = await requestModelWithFallback({
+    const analysis = await runSegmentedAnalysis({
       baseUrl,
       apiKey,
       model,
       payload
     });
 
-    if (!response.ok) {
-      return sendJson(res, response.status, {
-        error: "MODEL_REQUEST_FAILED",
-        message: data?.error?.message || data?.message || data?.rawText || "The model provider returned an error.",
-        provider_status: response.status
-      });
-    }
-
-    const text = extractText(data);
-    let parsed = null;
-    try {
-      parsed = text ? JSON.parse(text) : null;
-    } catch {
-      parsed = null;
-    }
-
     let updatedAccount = account;
     if (account) {
       const units = Number(payload?.usage_estimate?.units || 1);
-      const tokens = Number(data?.usage?.total_tokens || payload?.usage_estimate?.tokens || 0);
+      const tokens = Number(analysis.usage?.total_tokens || payload?.usage_estimate?.tokens || 0);
       await supabaseRequest("usage_logs", {
         method: "POST",
         body: JSON.stringify({
@@ -383,7 +594,8 @@ module.exports = async function handler(req, res) {
           metadata: {
             provider_model: model,
             product: payload?.product,
-            usage: data.usage || null
+            usage: analysis.usage || null,
+            workflow: "segmented_link_analysis"
           }
         })
       });
@@ -397,17 +609,18 @@ module.exports = async function handler(req, res) {
     return sendJson(res, 200, {
       ok: true,
       model,
-      reasoning_effort: usedReasoningEffort,
-      max_tokens: usedMaxTokens,
-      usage: data.usage || null,
+      reasoning_effort: analysis.reasoning_effort,
+      max_tokens: analysis.max_tokens,
+      usage: analysis.usage || null,
       account: publicAccount(updatedAccount),
-      result: parsed && typeof parsed === "object" ? { ...parsed, link_scan_results: payload.link_scan_results } : parsed,
-      rawText: parsed ? "" : text
+      result: { ...analysis.result, link_scan_results: payload.link_scan_results },
+      rawText: ""
     });
   } catch (error) {
     const isTimeout = error.code === "MODEL_TIMEOUT";
-    return sendJson(res, isTimeout ? 504 : 500, {
-      error: isTimeout ? "MODEL_TIMEOUT" : "GENERATE_FAILED",
+    const isProviderError = Number(error.statusCode || 0) >= 400;
+    return sendJson(res, isTimeout ? 504 : (isProviderError ? error.statusCode : 500), {
+      error: isTimeout ? "MODEL_TIMEOUT" : (isProviderError ? "MODEL_REQUEST_FAILED" : "GENERATE_FAILED"),
       message: error.message
     });
   }

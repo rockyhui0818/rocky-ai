@@ -1330,11 +1330,23 @@ function renderModelLinkDeconstruction() {
     `;
   }
 
+  const flow = result.analysis_flow && typeof result.analysis_flow === "object"
+    ? `
+      <h4>分段模型工作流</h4>
+      <div class="direction-grid">
+        ${renderAnalysisSection("1. 美国链接主图分析", result.analysis_flow.us_main_image_analysis)}
+        ${renderAnalysisSection("2. 巴西链接主图本土化", result.analysis_flow.br_main_image_analysis)}
+        ${renderAnalysisSection("3. 美国详情页结构分析", result.analysis_flow.us_detail_page_analysis)}
+        ${renderAnalysisSection("4. 巴西详情页本土化", result.analysis_flow.br_detail_page_analysis)}
+      </div>
+    `
+    : "";
+
   const sections = [
+    ["workflow_analysis", "综合优化逻辑"],
     ["link_analysis", "多链接拆解"],
-    ["us_visual_deconstruction", "美国链接主图/详情页设计拆解"],
-    ["br_visual_deconstruction", "巴西链接本土化拆解"],
-    ["localization_map", "本土化映射逻辑"],
+    ["main_image_plan", "主图生成方向"],
+    ["detail_page_plan", "详情页生成方向"],
     ["keywords", "模型关键词判断"],
     ["final_prompt_strategy", "最终提示词策略"],
     ["image_prompts", "模型图片提示词"]
@@ -1345,6 +1357,7 @@ function renderModelLinkDeconstruction() {
 
   return `
     <h3>模型深度拆解</h3>
+    ${flow}
     ${sections || `<p>模型已返回，但没有包含链接拆解字段。你可以在“模型接口”页查看完整原始 JSON。</p>`}
   `;
 }
