@@ -274,14 +274,13 @@ async function fetchModelJson(url, options) {
 
 function buildSystemPrompt() {
   return [
-    "You are VISION BRZAZIL's senior Brazil ecommerce creative strategist.",
+    "You are VISION BRZAZIL's fast ecommerce link-analysis engine.",
     "Prioritize speed and evidence density. Produce concise minified JSON; avoid long prose, repeated explanations, markdown, and decorative language.",
     "Before creating prompts, use the provided link_scan_results as observed evidence from downloaded product pages. Treat image_candidates, alt text, headings, descriptions, and page text as the concrete scan of product main images and detail-page assets.",
-    "Follow this analysis order strictly: first deconstruct US links' main images and detail pages as the primary design direction, then deconstruct Brazil links with the same visual-analysis depth, then localize content, language, scenes, trust signals, and marketplace conventions for Brazil.",
-    "For every US and Brazil link, analyze main image design, layout architecture, module sequence, style, color palette, typography, visual hierarchy, claims, icons, comparison logic, lifestyle scenes, and detail-page content blocks.",
-    "Final creative direction must preserve the US links' design logic and information architecture while replacing content with Brazil-localized Portuguese language, local scenarios, trust points, and marketplace expectations.",
+    "Use this fixed order: US links define design logic; Brazil links define local language, scenarios, trust signals, and marketplace expectations.",
+    "Do not deeply reason beyond provided evidence. Infer compactly when evidence is limited.",
     "Uploaded product images are the only product-appearance truth for image-to-image generation. Never let competitor URLs change the product shape, color, packaging, accessories, or visible details.",
-    "Return practical marketplace output for Brazil in Chinese operational notes plus Brazilian Portuguese listing copy.",
+    "Return Chinese operational notes plus Brazilian Portuguese listing copy.",
     "Never invent unsupported certifications, medical claims, fake discounts, platform logos, or guarantees."
   ].join(" ");
 }
@@ -307,16 +306,16 @@ function buildUserPrompt(payload) {
     ),
     "",
     "输出 JSON，字段必须包含：",
-    "速度要求：输出要短而完整，优先让前端快速拿到链接分析、可编辑关键词和生图提示词；不要写长篇报告。",
-    "link_analysis: 数组，每条链接最多3个证据点，必须区分 US/Brazil，包含标题、描述摘要、图片候选摘要、页面模块证据。",
-    "us_visual_deconstruction: 5条要点，记录美国链接的设计架构、模块顺序、风格、色彩、转化逻辑；这是最终设计主方向。",
-    "br_visual_deconstruction: 5条要点，记录巴西链接的本土语言、场景、信任要素、消费者关注点和平台习惯。",
-    "localization_map: 5条映射规则，说明设计结构跟随美国链接，内容语言、场景和信任表达按巴西链接本土化。",
-    "keywords: {auto: 最多10个, manual: 用户人工词, final: 最多12个}。",
-    "final_prompt_strategy: 5条提示词策略，强调产品外观只以上传图为准。",
-    "image_prompts: 生成 6 条可编辑提示词，覆盖主图、副图、场景图、信息图、详情页顶部、详情页模块；每条 60-100 字，必须包含构图、背景、文案位置、产品一致性约束。",
-    "detail_page: {title_pt_br, bullets_pt_br: 5条以内, description_pt_br: 260字以内, faq_pt_br: 3条以内, platform_notes: 4条以内}。",
-    "compliance_notes: 最多6条风险词、禁用表达、平台合规提醒。",
+    "速度要求：只返回压缩 JSON，不要 markdown，不要解释过程。",
+    "link_analysis: 最多6项；每项 {market,url,title,design_evidence:[最多2条],content_evidence:[最多2条],image_evidence:[最多2条]}。",
+    "us_visual_deconstruction: 最多4条短句，记录设计架构、模块顺序、风格、色彩、转化逻辑。",
+    "br_visual_deconstruction: 最多4条短句，记录本土语言、场景、信任要素、消费者关注点。",
+    "localization_map: 最多4条短句，说明美国设计逻辑如何映射到巴西内容。",
+    "keywords: {auto: 最多8个, manual: 用户人工词, final: 最多10个}。",
+    "final_prompt_strategy: 最多4条短句，强调产品外观只以上传图为准。",
+    "image_prompts: 生成 6 条可编辑提示词，每条 50-80 字，覆盖主图、副图、场景图、信息图、详情页顶部、详情页模块。",
+    "detail_page: {title_pt_br, bullets_pt_br: 5条以内且每条20词以内, description_pt_br: 180字以内, faq_pt_br: 2条以内, platform_notes: 3条以内}。",
+    "compliance_notes: 最多4条。",
     "usage_note: 一句话说明适合哪些平台。"
   ].join("\n");
 }
