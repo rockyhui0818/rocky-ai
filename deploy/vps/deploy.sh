@@ -24,6 +24,7 @@ fi
 cd "$APP_DIR"
 node --check app.js
 node --check server.js
+node --check api/_lib/env.js
 node --check api/health.js
 node --check api/generate.js
 node --check api/image.js

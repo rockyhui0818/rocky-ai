@@ -1,6 +1,9 @@
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
+const { loadEnvFile } = require("./api/_lib/env");
+
+loadEnvFile();
 
 const handlers = {
   "/api/health": require("./api/health"),
