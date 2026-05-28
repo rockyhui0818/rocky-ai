@@ -242,8 +242,9 @@ module.exports = async function handler(req, res) {
         String(item.prompt || prompt),
         "",
         "Critical product consistency rules:",
-        "Use the uploaded product reference as the source of truth for shape, color, material, proportions, visible features, and included accessories.",
-        "Do not invent a different product. Do not change core product design. Generate one standalone marketplace image only, not a collage."
+        "Use the uploaded product reference as the base product input, but you may adapt the final product styling, package form, color palette, layout, and visual presentation to match the competitor/reference creative direction requested in the prompt.",
+        "Never include competitor brand names, logos, trademarks, watermarks, platform logos, or recognizable branded IP. Replace any brand marks with blank/generic unbranded areas.",
+        "Generate one standalone marketplace image only, not a collage."
       ].join("\n");
       try {
         let result;

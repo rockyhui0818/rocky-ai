@@ -271,7 +271,7 @@ function buildMainImageAnalysisPrompt({ market, scans, product, priorAnalysis })
     "输出 JSON：{market,image_inventory:[{type,image_url,observations:[最多3条],layout,text_or_claims,localization_notes}],missing_types:[...],overall_style:[最多4条]}。",
     market === "US" ? "美国链接是最终主图与附图设计方向，逐张记录白底主图、场景图、信息图、尺寸细节图、对比图的构图、文案、视觉层级。" : "巴西链接只用于本土化，逐张记录葡语表达、生活场景、信任元素、当地审美和消费者关注点。",
     priorAnalysis ? "参考美国主图分析，只记录巴西本土化差异和可优化点，不重复美国内容。" : "",
-    "产品外观最终必须以上传产品图为准，链接图片只参考设计逻辑。",
+    "上传产品图是基础产品输入；允许参考或复刻竞品图片的外观方向、包装形态、颜色、版式和视觉风格，但必须去品牌化，不出现竞品 logo、商标、品牌名或水印。",
     JSON.stringify({ product: compactProduct(product), prior_analysis: priorAnalysis || null, image_inventory: imageInventoryFor(scans), evidence: imageEvidenceFor(scans, "main") })
   ].join("\n");
 }
@@ -292,7 +292,7 @@ function buildDetailPageAnalysisPrompt({ market, scans, product, priorAnalysis }
 function buildSynthesisPrompt(payload, analyses) {
   return [
     "任务：综合四个小分析结果，输出最终可编辑提示词。不要重新分析原始链接。",
-    "逻辑：主图 = 美国主图设计方向 + 巴西主图本土化；详情页 = 美国详情页结构 + 巴西详情页本土化；产品外观只以上传图为准。",
+    "逻辑：主图 = 美国主图设计方向 + 巴西主图本土化；详情页 = 美国详情页结构 + 巴西详情页本土化；上传产品图是基础产品输入，允许参考/复刻竞品外观、包装、颜色与版式，但必须去品牌化。",
     "输出 JSON 字段：",
     "workflow_analysis: {us_main,br_main,us_detail,br_detail,optimization_logic}",
     "link_analysis: 最多6项短证据摘要。",
@@ -300,7 +300,7 @@ function buildSynthesisPrompt(payload, analyses) {
     "detail_page_plan: 必须包含 hero_banner,core_features,lifestyle_usage,details_specs,faq,comparison_chart 六个详情页模块方向。",
     "keywords: {auto: 最多8个, manual: 用户人工词, final: 最多10个}。",
     "image_prompts: 生成 11 条简洁可编辑提示词对象；字段 {type,label,source_logic,br_localization,prompt}；前5条对应主图/附图类型，后6条对应详情页模块。",
-    "每条 prompt 控制在 45-75 字：上传产品图是唯一产品外观基准；美国链接提供构图/模块/风格；巴西链接提供葡语、本土场景和信任表达。",
+    "每条 prompt 控制在 45-75 字：上传产品图是基础产品输入；美国链接可提供外观、包装、颜色、构图、模块和风格；巴西链接提供葡语、本土场景和信任表达；禁止 logo/商标/品牌名。",
     "detail_page: {title_pt_br, bullets_pt_br: 5条以内, description_pt_br: 180字以内, faq_pt_br: 2条以内, platform_notes: 3条以内}。",
     "compliance_notes: 最多4条。",
     "usage_note: 一句话。",
@@ -343,7 +343,7 @@ function fallbackSegmentedResult(payload, analysisFlow, analysisMeta) {
     label,
     source_logic: "没有可用链接证据时使用平台通用高转化结构。",
     br_localization: "使用巴西葡语短句和本土日常场景。",
-    prompt: `图生图：上传产品图为唯一外观基准，严格保持产品颜色、结构、材质和比例。${prompt}`
+    prompt: `图生图：上传产品图为基础产品输入，可参考/复刻竞品外观、包装、颜色和版式，但必须移除竞品 logo、品牌名、商标和水印。${prompt}`
   }));
 
   return {
@@ -354,7 +354,7 @@ function fallbackSegmentedResult(payload, analysisFlow, analysisMeta) {
       br_main: "无巴西链接证据，采用巴西葡语与日常场景本土化。",
       us_detail: "无美国详情页证据，使用标准 A+ 模块结构。",
       br_detail: "无巴西详情页证据，采用本土语言、场景和信任表达。",
-      optimization_logic: "有链接时优先按美国设计结构和巴西本土化落地；无链接时使用保守通用模板。"
+      optimization_logic: "有链接时优先按美国设计结构、外观包装和巴西本土化落地；无链接时使用保守通用模板；全程禁止竞品 logo、商标和品牌名。"
     },
     link_analysis: [],
     main_image_plan: LISTING_IMAGE_TYPES,
@@ -668,7 +668,7 @@ function buildUserPrompt(payload) {
     "br_visual_deconstruction: 最多4条短句，记录本土语言、场景、信任要素、消费者关注点。",
     "localization_map: 最多4条短句，说明美国设计逻辑如何映射到巴西内容。",
     "keywords: {auto: 最多8个, manual: 用户人工词, final: 最多10个}。",
-    "final_prompt_strategy: 最多4条短句，强调产品外观只以上传图为准。",
+    "final_prompt_strategy: 最多4条短句，强调上传图是图生图基础，允许参考/复刻竞品外观包装和颜色，但必须去品牌化。",
     "image_prompts: 生成 6 条可编辑提示词，每条 50-80 字，覆盖主图、副图、场景图、信息图、详情页顶部、详情页模块。",
     "detail_page: {title_pt_br, bullets_pt_br: 5条以内且每条20词以内, description_pt_br: 180字以内, faq_pt_br: 2条以内, platform_notes: 3条以内}。",
     "compliance_notes: 最多4条。",
