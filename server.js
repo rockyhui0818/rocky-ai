@@ -3,6 +3,7 @@ const http = require("http");
 const path = require("path");
 
 const handlers = {
+  "/api/health": require("./api/health"),
   "/api/generate": require("./api/generate"),
   "/api/image": require("./api/image"),
   "/api/usage": require("./api/usage"),
