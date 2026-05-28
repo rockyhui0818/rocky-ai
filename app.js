@@ -1020,6 +1020,7 @@ function renderOutputs() {
     <p>${escapeHtml(pack.urlInfo.slugTerms.join(" · ") || "未解析到有效路径词")}</p>
     <h3>逐条链接分析</h3>
     <div class="link-analysis-list">${renderLinkAnalysis(pack.urlInfo.links)}</div>
+    ${renderReviewInsightsPanel()}
     ${renderLinkScanEvidence()}
     ${renderModelLinkDeconstruction()}
     <h3>主图与详情页方向</h3>
@@ -1362,6 +1363,69 @@ function renderModelLinkDeconstruction() {
     ${flow}
     ${sections || `<p>模型已返回，但没有包含链接拆解字段。你可以在“模型接口”页查看完整原始 JSON。</p>`}
   `;
+}
+
+function renderReviewInsightsPanel() {
+  const result = state.latestRemoteResult;
+  const insights = result?.review_insights;
+  const scans = Array.isArray(result?.link_scan_results) ? result.link_scan_results : [];
+  const scannedReviewCount = scans.filter((scan) => scan.review_insights).length;
+
+  if (!result) {
+    return `
+      <section class="review-insights-panel empty">
+        <div>
+          <h3>Review Insights</h3>
+          <p>点击“开始自动生成”后，这里会显示链接中提取的评分、评论摘要、高频好评点、差评点和本土语言。</p>
+        </div>
+        <span>等待链接扫描</span>
+      </section>
+    `;
+  }
+
+  const hasInsight = insights && typeof insights === "object";
+  const cards = hasInsight
+    ? [
+        ["高频好评点", insights.high_frequency_praise],
+        ["高频差评点", insights.high_frequency_complaints],
+        ["本土语言表达", insights.local_language],
+        ["真实使用场景", insights.usage_scenarios],
+        ["竞品弱点", insights.competitor_weaknesses],
+        ["如何用于前几屏", insights.how_to_use]
+      ]
+    : [];
+
+  return `
+    <section class="review-insights-panel">
+      <div class="review-insights-heading">
+        <div>
+          <h3>Review Insights</h3>
+          <p>辅助权重：只用于卖点校准、本土语言、使用场景和差评预防，不覆盖产品图和美国主图/详情页结构。</p>
+        </div>
+        <span>${scannedReviewCount ? `${scannedReviewCount} 条链接含 review 信号` : "未提取到可见评论"}</span>
+      </div>
+      ${cards.length ? `
+        <div class="review-insights-grid">
+          ${cards.map(([label, value]) => `
+            <article>
+              <b>${escapeHtml(label)}</b>
+              ${renderInsightValue(value)}
+            </article>
+          `).join("")}
+        </div>
+      ` : `<p>当前模型结果没有返回 Review Insights。请确认链接页面是否有可见评分或评论摘要。</p>`}
+    </section>
+  `;
+}
+
+function renderInsightValue(value) {
+  if (Array.isArray(value) && value.length) {
+    return `<ul>${value.slice(0, 6).map((item) => `<li>${escapeHtml(typeof item === "string" ? item : JSON.stringify(item))}</li>`).join("")}</ul>`;
+  }
+  if (value && typeof value === "object") {
+    return `<p>${escapeHtml(JSON.stringify(value))}</p>`;
+  }
+  return `<p>暂无提取结果</p>`;
 }
 
 function renderLinkScanEvidence() {

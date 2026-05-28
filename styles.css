@@ -711,6 +711,64 @@ button:disabled {
   margin-bottom: 18px;
 }
 
+.review-insights-panel {
+  border: 1px solid rgba(124, 58, 237, 0.24);
+  background:
+    radial-gradient(circle at top left, rgba(247, 196, 83, 0.22), transparent 34%),
+    linear-gradient(135deg, rgba(124, 58, 237, 0.12), rgba(255, 255, 255, 0.96));
+  padding: 16px;
+  margin: 16px 0 18px;
+}
+
+.review-insights-panel.empty {
+  border-style: dashed;
+}
+
+.review-insights-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.review-insights-heading h3 {
+  margin-top: 0;
+}
+
+.review-insights-heading span {
+  border: 1px solid rgba(124, 58, 237, 0.24);
+  background: white;
+  color: var(--accent-dark);
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.review-insights-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.review-insights-grid article {
+  border: 1px solid rgba(124, 58, 237, 0.16);
+  background: rgba(255, 255, 255, 0.86);
+  padding: 12px;
+}
+
+.review-insights-grid b {
+  display: block;
+  color: var(--accent-dark);
+  margin-bottom: 7px;
+}
+
+.review-insights-grid ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .generated-image-card {
   margin: 12px 0;
   border: 1px solid var(--line);
