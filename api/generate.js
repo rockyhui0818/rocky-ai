@@ -7,6 +7,7 @@ const LINK_SCAN_TIMEOUT_MS = 6000;
 const MAX_SCAN_LINKS = 6;
 const MAX_IMAGE_CANDIDATES = 8;
 const MAX_HEADINGS = 10;
+const MAX_REVIEW_SNIPPETS = 8;
 const PAGE_TEXT_SAMPLE_LENGTH = 900;
 const DEFAULT_MAX_COMPLETION_TOKENS = 900;
 const DEFAULT_SYNTHESIS_MAX_TOKENS = 1600;
@@ -100,6 +101,85 @@ function extractHeadings(html) {
     .slice(0, MAX_HEADINGS);
 }
 
+function extractRating(html) {
+  const sources = [
+    html.match(/"ratingValue"\s*:\s*"?([0-5](?:[.,]\d+)?)"?/i)?.[1],
+    html.match(/itemprop=["']ratingValue["'][^>]+content=["']([0-5](?:[.,]\d+)?)["']/i)?.[1],
+    html.match(/([0-5](?:[.,]\d+)?)\s+(?:out of|de)\s+5/i)?.[1]
+  ].filter(Boolean);
+  return sources[0] ? Number(String(sources[0]).replace(",", ".")) : null;
+}
+
+function extractReviewCount(html) {
+  const sources = [
+    html.match(/"reviewCount"\s*:\s*"?([\d.,]+)"?/i)?.[1],
+    html.match(/itemprop=["']reviewCount["'][^>]+content=["']([\d.,]+)["']/i)?.[1],
+    html.match(/([\d.,]+)\s+(?:ratings|reviews|avalia(?:ç|c)[õo]es|coment[aá]rios)/i)?.[1]
+  ].filter(Boolean);
+  return sources[0] ? Number(String(sources[0]).replace(/[^\d]/g, "")) || null : null;
+}
+
+function extractReviewSnippets(html) {
+  const snippets = [];
+  const patterns = [
+    /data-hook=["']review-body["'][^>]*>([\s\S]*?)<\/(?:span|div)>/gi,
+    /data-hook=["']review-title["'][^>]*>([\s\S]*?)<\/(?:span|a|div)>/gi,
+    /class=["'][^"']*(?:review|comentario|comment)[^"']*["'][^>]*>([\s\S]*?)<\/(?:p|span|div)>/gi
+  ];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(html)) && snippets.length < MAX_REVIEW_SNIPPETS) {
+      const text = cleanText(match[1], 260);
+      if (text.length >= 18 && !snippets.includes(text)) snippets.push(text);
+    }
+  }
+
+  if (snippets.length < 3) {
+    const text = cleanText(html, 12000);
+    const reviewLike = text
+      .split(/(?<=[.!?。！？])\s+|\s{2,}/)
+      .map((item) => cleanText(item, 260))
+      .filter((item) => /(quality|size|easy|durable|package|shipping|delivery|recommend|qualidade|tamanho|f[aá]cil|dur[aá]vel|embalagem|entrega|recomendo|bom|boa|ruim|excelente)/i.test(item));
+    for (const item of reviewLike) {
+      if (snippets.length >= MAX_REVIEW_SNIPPETS) break;
+      if (item.length >= 18 && !snippets.includes(item)) snippets.push(item);
+    }
+  }
+
+  return snippets.slice(0, MAX_REVIEW_SNIPPETS);
+}
+
+function countTerms(text, terms) {
+  const lower = String(text || "").toLowerCase();
+  return terms
+    .map((term) => ({ term, count: (lower.match(new RegExp(term, "gi")) || []).length }))
+    .filter((item) => item.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+}
+
+function extractReviewInsights(html) {
+  const snippets = extractReviewSnippets(html);
+  const reviewText = snippets.join(" ");
+  return {
+    rating: extractRating(html),
+    review_count: extractReviewCount(html),
+    snippets,
+    positive_terms: countTerms(reviewText, [
+      "quality", "easy", "durable", "recommend", "comfortable", "great", "excellent",
+      "qualidade", "fácil", "durável", "recomendo", "confortável", "ótimo", "excelente", "bom", "boa"
+    ]),
+    negative_terms: countTerms(reviewText, [
+      "small", "large", "size", "broken", "hard", "difficult", "package", "shipping", "delivery",
+      "pequeno", "grande", "tamanho", "quebrado", "difícil", "embalagem", "entrega", "ruim", "fraco"
+    ]),
+    scene_terms: countTerms(reviewText, [
+      "home", "office", "travel", "outdoor", "daily", "family", "work",
+      "casa", "escritório", "viagem", "rua", "dia a dia", "família", "trabalho"
+    ])
+  };
+}
+
 async function scanProductLink(url, marketHint) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), LINK_SCAN_TIMEOUT_MS);
@@ -122,6 +202,7 @@ async function scanProductLink(url, marketHint) {
       description: cleanText(extractMeta(html, "description") || extractMeta(html, "og:description"), 500),
       image_candidates: extractImageCandidates(html, response.url),
       headings: extractHeadings(html),
+      review_insights: extractReviewInsights(html),
       page_text_sample: cleanText(html, PAGE_TEXT_SAMPLE_LENGTH)
     };
   } catch (error) {
@@ -173,8 +254,9 @@ function compactScanResult(item = {}) {
           src: image.src,
           alt: cleanText(image.alt, 120),
           score: image.score
-        }))
+      }))
       : [],
+    review_insights: item.review_insights || null,
     headings: Array.isArray(item.headings)
       ? item.headings.slice(0, MAX_HEADINGS).map((heading) => ({
           level: heading.level,
@@ -207,6 +289,15 @@ function splitScansByMarket(scanResults = []) {
     grouped[marketBucket(scan)].push(scan);
   }
   return grouped;
+}
+
+function reviewEvidenceFor(scans = []) {
+  return scans.map((scan) => ({
+    url: scan.url,
+    title: scan.title,
+    market_hint: scan.market_hint,
+    review_insights: scan.review_insights || null
+  })).filter((item) => item.review_insights);
 }
 
 function imageEvidenceFor(scans = [], mode) {
@@ -293,8 +384,10 @@ function buildSynthesisPrompt(payload, analyses) {
   return [
     "任务：综合四个小分析结果，输出最终可编辑提示词。不要重新分析原始链接。",
     "逻辑：主图 = 美国主图设计方向 + 巴西主图本土化；详情页 = 美国详情页结构 + 巴西详情页本土化；上传产品图是基础产品输入，允许参考/复刻竞品外观、包装、颜色与版式，但必须去品牌化。",
+    "Review Insights 是独立辅助模块，权重低于上传产品图和美国链接主图/详情页结构。只用于卖点校准、本土语言、使用场景、差评预防和竞品弱点，不得覆盖产品外观和设计结构。",
     "输出 JSON 字段：",
     "workflow_analysis: {us_main,br_main,us_detail,br_detail,optimization_logic}",
+    "review_insights: {high_frequency_praise:[最多5条],high_frequency_complaints:[最多5条],local_language:[最多8个葡语/英语评价词],usage_scenarios:[最多5条],competitor_weaknesses:[最多5条],how_to_use:[最多5条说明如何放入主图/副图/详情页前几屏]}",
     "link_analysis: 最多6项短证据摘要。",
     "main_image_plan: 必须包含 white_main,lifestyle,infographic,details_specs,comparison 五类图片方向。",
     "detail_page_plan: 必须包含 hero_banner,core_features,lifestyle_usage,details_specs,faq,comparison_chart 六个详情页模块方向。",
@@ -310,7 +403,12 @@ function buildSynthesisPrompt(payload, analyses) {
       assets: payload.assets,
       constraints: payload.constraints,
       prompt_pack: payload.prompts,
-      analyses
+      analyses,
+      review_evidence: {
+        us: reviewEvidenceFor(splitScansByMarket(payload.link_scan_results || []).us),
+        brazil: reviewEvidenceFor(splitScansByMarket(payload.link_scan_results || []).brazil),
+        other: reviewEvidenceFor(splitScansByMarket(payload.link_scan_results || []).other)
+      }
     })
   ].join("\n");
 }
@@ -355,6 +453,14 @@ function fallbackSegmentedResult(payload, analysisFlow, analysisMeta) {
       us_detail: "无美国详情页证据，使用标准 A+ 模块结构。",
       br_detail: "无巴西详情页证据，采用本土语言、场景和信任表达。",
       optimization_logic: "有链接时优先按美国设计结构、外观包装和巴西本土化落地；无链接时使用保守通用模板；全程禁止竞品 logo、商标和品牌名。"
+    },
+    review_insights: {
+      high_frequency_praise: [],
+      high_frequency_complaints: [],
+      local_language: [],
+      usage_scenarios: [],
+      competitor_weaknesses: [],
+      how_to_use: ["无可见 review 证据时，不把 review 作为主图或详情页核心依据。"]
     },
     link_analysis: [],
     main_image_plan: LISTING_IMAGE_TYPES,

@@ -855,6 +855,7 @@ function buildPromptPack() {
     `跨市场参考策略：${urlInfo.summary}`,
     `美国竞品链接分析是主要方向：必须把美国链接主图与详情页的设计拆成可执行设计蓝图，包括外观方向、包装形态、色彩系统、构图比例、信息层级、模块架构、场景表达、图标/标注方式、对比方式和消费者购买理由；可以参考/复刻竞品外观包装和颜色，但不得出现竞品品牌 logo、商标、品牌名或水印。`,
     `巴西链接只做本土化分析：用同样维度解析巴西主图和详情页，但最终只抽取更本土的葡语短句、当地生活场景、价格敏感点、信任背书、配送/售后表达、平台规则和移动端阅读习惯。`,
+    `Review Insights 辅助权重：美国/巴西 review 只用于校准真实打动用户的卖点、暴露高频差评点、提取自然葡语/英语评价语气和真实使用场景；不得覆盖上传产品图、美国主图结构和美国详情页结构。`,
     `关键词信号：${keywords.join(", ") || "待补充"}${manualKeywords.length ? "（人工修正关键词，优先级最高）" : "（自动拆解关键词）"}`,
     `核心卖点：${sellingPoints.join("；") || "请根据产品图识别材质、功能、使用场景和差异化优势"}`,
     `图片规则：${platform.imageRules.join(" ")}`,
@@ -1344,6 +1345,7 @@ function renderModelLinkDeconstruction() {
 
   const sections = [
     ["workflow_analysis", "综合优化逻辑"],
+    ["review_insights", "Review Insights"],
     ["link_analysis", "多链接拆解"],
     ["main_image_plan", "主图生成方向"],
     ["detail_page_plan", "详情页生成方向"],
@@ -1378,11 +1380,20 @@ function renderLinkScanEvidence() {
 function renderScanEvidenceItem(scan) {
   const images = Array.isArray(scan.image_candidates) ? scan.image_candidates.slice(0, 6) : [];
   const headings = Array.isArray(scan.headings) ? scan.headings.slice(0, 8) : [];
+  const reviews = scan.review_insights || {};
+  const reviewBits = [
+    reviews.rating ? `评分 ${reviews.rating}` : "",
+    reviews.review_count ? `${reviews.review_count} 条评价` : "",
+    Array.isArray(reviews.positive_terms) && reviews.positive_terms.length ? `好评词：${reviews.positive_terms.slice(0, 4).map((item) => item.term).join(" / ")}` : "",
+    Array.isArray(reviews.negative_terms) && reviews.negative_terms.length ? `差评词：${reviews.negative_terms.slice(0, 4).map((item) => item.term).join(" / ")}` : ""
+  ].filter(Boolean);
   return `
     <article class="scan-evidence-card">
       <b>${escapeHtml(scan.title || scan.url || "链接扫描结果")}</b>
       <span>${escapeHtml(scan.final_url || scan.url || "")} · ${scan.ok ? "扫描成功" : escapeHtml(scan.error || "扫描失败")}</span>
       ${scan.description ? `<p>${escapeHtml(scan.description)}</p>` : ""}
+      ${reviewBits.length ? `<div class="scan-tags">${reviewBits.map((item) => `<em>${escapeHtml(item)}</em>`).join("")}</div>` : ""}
+      ${Array.isArray(reviews.snippets) && reviews.snippets.length ? `<p><b>Review 摘要：</b>${escapeHtml(reviews.snippets.slice(0, 2).join(" / "))}</p>` : ""}
       ${headings.length ? `<div class="scan-tags">${headings.map((item) => `<em>H${escapeHtml(item.level)} ${escapeHtml(item.text)}</em>`).join("")}</div>` : ""}
       ${images.length ? `
         <div class="scan-image-list">
@@ -1762,9 +1773,10 @@ function buildApiDraft(pack) {
     workflow_required_order: [
       "1. 后端先下载扫描美国产品链接和巴西产品链接页面。",
       "2. 从页面中提取主图、详情页图片候选、图片 alt、标题、描述、模块标题和正文样本。",
-      "3. 模型先展示美国链接设计拆解，再展示巴西链接本土化拆解。",
-      "4. 综合后生成可人工修改的具体图片提示词和详情页提示词。",
-      "5. 最后使用上传产品图作为图生图基础，并结合竞品外观包装方向逐张生图，同时去除品牌 logo 与商标。"
+      "3. 同时提取可见 review 摘要、评分、评论数量和高频评价词，作为 Review Insights 独立模块。",
+      "4. 模型先展示美国链接设计拆解，再展示巴西链接本土化拆解，Review Insights 只做卖点校准和差评预防。",
+      "5. 综合后生成可人工修改的具体图片提示词和详情页提示词。",
+      "6. 最后使用上传产品图作为图生图基础，并结合竞品外观包装方向逐张生图，同时去除品牌 logo 与商标。"
     ]
   };
 }
@@ -2051,6 +2063,7 @@ function buildRemoteImagePromptQueue(pack) {
     `图生图基准：使用上传产品图片作为基础产品输入。`,
     `允许参考/复刻美国竞品的外观方向、包装形态、颜色、材质表达、版式和视觉风格。`,
     `美国链接只参考构图、模块、风格、色彩和信息层级；巴西链接只参考葡语表达、本土场景和信任点。`,
+    `Review Insights 只用于补充高频好评点、差评预防、真实使用场景和本土评价语气，不能覆盖主视觉结构。`,
     `必须去品牌化：不出现竞品 logo、商标、品牌名、水印、平台 logo 或可识别 IP。`,
     `每次只生成一张独立图片，不要拼图，不要四宫格。`
   ].join("\n");
