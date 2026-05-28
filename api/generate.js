@@ -2,6 +2,8 @@ const { getAccountByToken, publicAccount } = require("./_lib/auth");
 const { getBearerToken, handleOptions, readJson, sendJson } = require("./_lib/http");
 const { filter, supabaseRequest } = require("./_lib/supabase");
 
+const MODEL_TIMEOUT_MS = 120000;
+
 function extractText(data) {
   return data?.choices?.[0]?.message?.content || data?.output_text || data?.content?.[0]?.text || "";
 }
@@ -119,6 +121,31 @@ async function scanProductLinks(payload) {
   return Promise.all(urls.map((url, index) => scanProductLink(url, markets[index] || null)));
 }
 
+async function fetchModelJson(url, options) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const rawText = await response.text().catch(() => "");
+    let data = {};
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch {
+      data = { rawText };
+    }
+    return { response, data, rawText };
+  } catch (error) {
+    if (error.name === "AbortError") {
+      const timeoutError = new Error("模型接口超时：上游模型在 120 秒内没有返回，请稍后重试或检查 OPENAI_BASE_URL / 模型名称。");
+      timeoutError.code = "MODEL_TIMEOUT";
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function buildSystemPrompt() {
   return [
     "You are VISION BRZAZIL's senior Brazil ecommerce creative strategist.",
@@ -188,7 +215,7 @@ module.exports = async function handler(req, res) {
     const payload = await readJson(req);
     payload.link_scan_results = await scanProductLinks(payload);
     const account = await getAccountByToken(getBearerToken(req)).catch(() => null);
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const { response, data } = await fetchModelJson(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -204,11 +231,10 @@ module.exports = async function handler(req, res) {
       })
     });
 
-    const data = await response.json();
     if (!response.ok) {
       return sendJson(res, response.status, {
         error: "MODEL_REQUEST_FAILED",
-        message: data?.error?.message || "The model provider returned an error.",
+        message: data?.error?.message || data?.message || data?.rawText || "The model provider returned an error.",
         provider_status: response.status
       });
     }
@@ -259,8 +285,9 @@ module.exports = async function handler(req, res) {
       rawText: parsed ? "" : text
     });
   } catch (error) {
-    return sendJson(res, 500, {
-      error: "GENERATE_FAILED",
+    const isTimeout = error.code === "MODEL_TIMEOUT";
+    return sendJson(res, isTimeout ? 504 : 500, {
+      error: isTimeout ? "MODEL_TIMEOUT" : "GENERATE_FAILED",
       message: error.message
     });
   }
