@@ -425,6 +425,17 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
   const product = payload.product || {};
   const settled = [];
   const runStep = async (key, prompt, scans, mode) => {
+    if (!scans.length) {
+      const skipped = {
+        result: { skipped: true, reason: "No matching links were provided for this stage." },
+        usage: null,
+        reasoning_effort: "skipped",
+        max_tokens: 0
+      };
+      settled.push([key, skipped]);
+      return skipped.result;
+    }
+
     try {
       const value = await runJsonTask({
         baseUrl,
@@ -443,10 +454,15 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
     }
   };
 
-  const usMain = await runStep("us_main_image_analysis", buildMainImageAnalysisPrompt({ market: "US", scans: usScans, product }), usScans, "main");
-  await runStep("br_main_image_analysis", buildMainImageAnalysisPrompt({ market: "Brazil", scans: brScans, product, priorAnalysis: usMain }), brScans, "main");
-  const usDetail = await runStep("us_detail_page_analysis", buildDetailPageAnalysisPrompt({ market: "US", scans: usScans, product }), usScans, "detail");
-  await runStep("br_detail_page_analysis", buildDetailPageAnalysisPrompt({ market: "Brazil", scans: brScans, product, priorAnalysis: usDetail }), brScans, "detail");
+  const [usMain, usDetail] = await Promise.all([
+    runStep("us_main_image_analysis", buildMainImageAnalysisPrompt({ market: "US", scans: usScans, product }), usScans, "main"),
+    runStep("us_detail_page_analysis", buildDetailPageAnalysisPrompt({ market: "US", scans: usScans, product }), usScans, "detail")
+  ]);
+
+  await Promise.all([
+    runStep("br_main_image_analysis", buildMainImageAnalysisPrompt({ market: "Brazil", scans: brScans, product, priorAnalysis: usMain }), brScans, "main"),
+    runStep("br_detail_page_analysis", buildDetailPageAnalysisPrompt({ market: "Brazil", scans: brScans, product, priorAnalysis: usDetail }), brScans, "detail")
+  ]);
 
   const analyses = Object.fromEntries(settled.map(([key, value]) => [key, value.result]));
   const analysisMeta = Object.fromEntries(settled.map(([key, value]) => [key, {
