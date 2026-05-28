@@ -9,7 +9,22 @@ const MAX_IMAGE_CANDIDATES = 8;
 const MAX_HEADINGS = 10;
 const PAGE_TEXT_SAMPLE_LENGTH = 900;
 const DEFAULT_MAX_COMPLETION_TOKENS = 900;
-const DEFAULT_SYNTHESIS_MAX_TOKENS = 1600;
+const DEFAULT_SYNTHESIS_MAX_TOKENS = 2400;
+const LISTING_IMAGE_TYPES = [
+  "white_main",
+  "lifestyle",
+  "infographic",
+  "details_specs",
+  "comparison"
+];
+const DETAIL_MODULE_TYPES = [
+  "hero_banner",
+  "core_features",
+  "lifestyle_usage",
+  "details_specs",
+  "faq",
+  "comparison_chart"
+];
 
 function extractText(data) {
   return data?.choices?.[0]?.message?.content || data?.output_text || data?.content?.[0]?.text || "";
@@ -221,27 +236,56 @@ function imageUrlsFor(scans = [], mode, limit = 6) {
   return urls;
 }
 
+function classifyImageCandidate(image = {}) {
+  const source = `${image.type || ""} ${image.src || ""} ${image.alt || ""}`.toLowerCase();
+  if (source.includes("white") || source.includes("main") || source.includes("primary") || source.includes("principal")) return "white_main";
+  if (source.includes("lifestyle") || source.includes("scene") || source.includes("use") || source.includes("hero")) return "lifestyle";
+  if (source.includes("info") || source.includes("feature") || source.includes("benefit") || source.includes("aplus")) return "infographic";
+  if (source.includes("detail") || source.includes("spec") || source.includes("size") || source.includes("dimension")) return "details_specs";
+  if (source.includes("compare") || source.includes("comparison")) return "comparison";
+  return "supporting";
+}
+
+function imageInventoryFor(scans = []) {
+  const inventory = [];
+  for (const scan of scans) {
+    for (const image of scan.image_candidates || []) {
+      inventory.push({
+        source_url: scan.url,
+        page_title: scan.title,
+        image_url: image.src,
+        alt: image.alt,
+        inferred_type: classifyImageCandidate(image),
+        score: image.score
+      });
+    }
+  }
+  return inventory.slice(0, 18);
+}
+
 function buildMainImageAnalysisPrompt({ market, scans, product, priorAnalysis }) {
   return [
-    `任务：只分析 ${market} 链接的主图/商品首屏图片。`,
-    "优先直接观察随消息附带的 image_url 图片；如果图片无法读取，再使用 image_candidates 的 URL、alt、标题和页面摘要。",
-    "输出 JSON：{market,main_image_analysis:[最多5条],visual_style:[最多4条],layout_rules:[最多4条],claims_or_text:[最多4条],usable_image_refs:[最多4项]}。",
-    market === "US" ? "美国链接是最终主图设计方向，重点记录构图、背景、产品摆放、视觉层级、色彩和转化表达。" : "巴西链接只用于本土化，重点记录葡语表达、生活场景、信任元素和当地审美。",
+    `任务：逐张分析 ${market} 链接的商品图片，不只看一张主图。`,
+    "优先直接观察随消息附带的 image_url 图片；如果图片无法读取，再使用图片 URL、alt、标题和页面摘要。",
+    `必须按这些类型归类并分析：${LISTING_IMAGE_TYPES.join(", ")}。`,
+    "输出 JSON：{market,image_inventory:[{type,image_url,observations:[最多3条],layout,text_or_claims,localization_notes}],missing_types:[...],overall_style:[最多4条]}。",
+    market === "US" ? "美国链接是最终主图与附图设计方向，逐张记录白底主图、场景图、信息图、尺寸细节图、对比图的构图、文案、视觉层级。" : "巴西链接只用于本土化，逐张记录葡语表达、生活场景、信任元素、当地审美和消费者关注点。",
     priorAnalysis ? "参考美国主图分析，只记录巴西本土化差异和可优化点，不重复美国内容。" : "",
     "产品外观最终必须以上传产品图为准，链接图片只参考设计逻辑。",
-    JSON.stringify({ product: compactProduct(product), prior_analysis: priorAnalysis || null, evidence: imageEvidenceFor(scans, "main") })
+    JSON.stringify({ product: compactProduct(product), prior_analysis: priorAnalysis || null, image_inventory: imageInventoryFor(scans), evidence: imageEvidenceFor(scans, "main") })
   ].join("\n");
 }
 
 function buildDetailPageAnalysisPrompt({ market, scans, product, priorAnalysis }) {
   return [
-    `任务：只分析 ${market} 链接的详情页/A+模块/长图结构。`,
+    `任务：逐模块分析 ${market} 链接的详情页/A+模块/长图结构。`,
     "优先直接观察随消息附带的 image_url 图片；如果图片无法读取，再使用 image_candidates、headings 和 page_text_sample。",
-    "输出 JSON：{market,detail_page_analysis:[最多6条],module_sequence:[最多6条],copy_angles:[最多5条],visual_blocks:[最多5条],usable_image_refs:[最多5项]}。",
-    market === "US" ? "美国链接是详情页设计结构主方向，重点记录模块顺序、版式、信息层级和视觉节奏。" : "巴西链接用于本土化，重点记录葡语、当地场景、信任表达、消费者关注点。",
+    `必须按这些详情页模块归类：${DETAIL_MODULE_TYPES.join(", ")}。`,
+    "输出 JSON：{market,module_inventory:[{type,image_url_or_section,observations:[最多3条],layout,copy_angle,localization_notes}],module_sequence:[最多6条],missing_modules:[...]}。",
+    market === "US" ? "美国链接是详情页设计结构主方向，逐模块记录 Hero、核心卖点、生活方式、细节规格、FAQ、对比图的版式、信息层级和视觉节奏。" : "巴西链接用于本土化，逐模块记录葡语、当地场景、信任表达、消费者关注点。",
     priorAnalysis ? "参考美国详情页分析，只记录巴西本土化差异和可优化点，不重复美国内容。" : "",
     "不要发明页面没有证据的认证、保修、折扣或平台背书。",
-    JSON.stringify({ product: compactProduct(product), prior_analysis: priorAnalysis || null, evidence: imageEvidenceFor(scans, "detail") })
+    JSON.stringify({ product: compactProduct(product), prior_analysis: priorAnalysis || null, image_inventory: imageInventoryFor(scans), evidence: imageEvidenceFor(scans, "detail") })
   ].join("\n");
 }
 
@@ -252,10 +296,11 @@ function buildSynthesisPrompt(payload, analyses) {
     "输出 JSON 字段：",
     "workflow_analysis: {us_main,br_main,us_detail,br_detail,optimization_logic}",
     "link_analysis: 最多6项短证据摘要。",
-    "main_image_plan: 最多5条主图生成方向。",
-    "detail_page_plan: 最多5条详情页模块方向。",
+    "main_image_plan: 必须包含 white_main,lifestyle,infographic,details_specs,comparison 五类图片方向。",
+    "detail_page_plan: 必须包含 hero_banner,core_features,lifestyle_usage,details_specs,faq,comparison_chart 六个详情页模块方向。",
     "keywords: {auto: 最多8个, manual: 用户人工词, final: 最多10个}。",
-    "image_prompts: 生成 6 条可编辑提示词，分别覆盖主图、副图、场景图、信息图、详情页顶部、详情页模块；每条 60-100 字。",
+    "image_prompts: 生成 11 条可编辑提示词对象；字段 {type,label,source_logic,br_localization,prompt}；前5条对应主图/附图类型，后6条对应详情页模块。",
+    "每条 prompt 必须以图生图逻辑写：上传产品图是唯一产品外观基准；美国链接提供构图/模块/风格；巴西链接提供葡语、本土场景和信任表达。",
     "detail_page: {title_pt_br, bullets_pt_br: 5条以内, description_pt_br: 180字以内, faq_pt_br: 2条以内, platform_notes: 3条以内}。",
     "compliance_notes: 最多4条。",
     "usage_note: 一句话。",

@@ -1452,7 +1452,8 @@ function buildModelGuidedPromptPack(basePack, remoteResult) {
     imagePrompt: modelImagePrompt,
     detailPrompt: modelDetailPrompt,
     modelImagePrompt,
-    modelDetailPrompt
+    modelDetailPrompt,
+    remoteImagePrompts: Array.isArray(remoteResult.image_prompts) ? remoteResult.image_prompts : []
   };
 }
 
@@ -1960,6 +1961,9 @@ function withTargetSpec(type, label, brief) {
 }
 
 function buildImagePromptQueue(pack) {
+  const remoteQueue = buildRemoteImagePromptQueue(pack);
+  if (remoteQueue.length) return remoteQueue;
+
   const consistency = [
     `产品：${pack.productName}`,
     `用户最终定制提示词：${pack.imagePrompt}`,
@@ -2012,6 +2016,57 @@ function buildImagePromptQueue(pack) {
       `${consistency}\n生成一张独立包装清单或规格模块图：展示实际包含内容、规格参数和注意事项；不得添加上传图和用户描述中不存在的配件，葡语短句本土化。`
     )
   ];
+}
+
+function normalizePromptType(type, index) {
+  const raw = String(type || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  const map = {
+    white_main: "main",
+    main_image: "main",
+    main: "main",
+    lifestyle: "lifestyle",
+    lifestyle_usage: "detail-usage",
+    infographic: "infographic",
+    details_specs: "detail",
+    detail_specs: "detail",
+    comparison: "detail-comparison",
+    comparison_chart: "detail-comparison",
+    hero_banner: "detail-hero",
+    core_features: "detail-benefits",
+    faq: "detail-faq"
+  };
+  return map[raw] || (index >= 5 ? `detail-${raw || index + 1}` : raw || `image-${index + 1}`);
+}
+
+function buildRemoteImagePromptQueue(pack) {
+  const prompts = Array.isArray(pack.remoteImagePrompts)
+    ? pack.remoteImagePrompts
+    : Array.isArray(state.latestRemoteResult?.image_prompts)
+      ? state.latestRemoteResult.image_prompts
+      : [];
+  if (!prompts.length) return [];
+
+  const consistency = [
+    `产品：${pack.productName}`,
+    `最高优先级：使用上传产品图片做图生图，上传图是唯一产品外观基准。`,
+    `严格保持上传图中的产品外观、颜色、材质、结构、比例、配件、包装和可见细节。`,
+    `美国链接只参考构图、模块、风格、色彩和信息层级；巴西链接只参考葡语表达、本土场景和信任点。`,
+    `不要复制竞品品牌、包装、颜色、logo、人物肖像或任何未上传的产品外观。`,
+    `每次只生成一张独立图片，不要拼图，不要四宫格。`
+  ].join("\n");
+
+  return prompts.slice(0, 12).map((item, index) => {
+    const type = normalizePromptType(item?.type || item?.module || item?.kind, index);
+    const label = item?.label || item?.title || item?.type || `模型提示词 ${index + 1}`;
+    const sourceLogic = item?.source_logic ? `参考美国链接逻辑：${item.source_logic}` : "";
+    const brLocalization = item?.br_localization ? `巴西本土化：${item.br_localization}` : "";
+    const promptText = typeof item === "string" ? item : item?.prompt || extractPromptText(item);
+    return withTargetSpec(
+      type,
+      label,
+      [consistency, sourceLogic, brLocalization, promptText].filter(Boolean).join("\n")
+    );
+  });
 }
 
 async function getReferenceImageDataUrls() {
