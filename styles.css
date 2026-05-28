@@ -1053,6 +1053,56 @@ button:disabled {
   font-weight: 900;
 }
 
+.scan-evidence-list {
+  display: grid;
+  gap: 12px;
+}
+
+.scan-evidence-card {
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  background: white;
+  padding: 14px;
+}
+
+.scan-evidence-card > b,
+.scan-evidence-card > span {
+  display: block;
+}
+
+.scan-evidence-card > span,
+.scan-image-list small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.scan-tags,
+.scan-image-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.scan-tags {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.scan-tags em,
+.scan-image-list a {
+  border: 1px solid var(--line);
+  background: rgba(255, 250, 255, 0.72);
+  color: var(--ink);
+  padding: 8px;
+  text-decoration: none;
+}
+
+.scan-image-list strong {
+  display: block;
+  color: var(--accent-dark);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
 .keyword-review {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

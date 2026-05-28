@@ -253,6 +253,7 @@ const localFallbackCredentials = {
 };
 
 const PUBLIC_API_BASE_URL = "https://rocky-ai-khaki.vercel.app";
+const MAX_REFERENCE_IMAGES = 6;
 
 const defaultUsageLogs = [
   {
@@ -911,7 +912,7 @@ function getWorkflowState(pack) {
       step: "01",
       title: "产品图基准",
       status: state.images.length ? "ready" : "pending",
-      note: state.images.length ? `${state.images.length} 张产品图已上传，最多 4 张会作为多角度视觉参考。` : "请先上传产品图，否则生图只能按文字猜测。"
+      note: state.images.length ? `${state.images.length} 张产品图已上传，最多 ${MAX_REFERENCE_IMAGES} 张会作为多角度视觉参考。` : "请先上传产品图，否则生图只能按文字猜测。"
     },
     {
       step: "02",
@@ -994,6 +995,7 @@ function renderOutputs() {
     <p>${escapeHtml(pack.urlInfo.slugTerms.join(" · ") || "未解析到有效路径词")}</p>
     <h3>逐条链接分析</h3>
     <div class="link-analysis-list">${renderLinkAnalysis(pack.urlInfo.links)}</div>
+    ${renderLinkScanEvidence()}
     ${renderModelLinkDeconstruction()}
     <h3>主图与详情页方向</h3>
     <div class="direction-grid">
@@ -1310,6 +1312,7 @@ function renderModelLinkDeconstruction() {
     ["br_visual_deconstruction", "巴西链接本土化拆解"],
     ["localization_map", "本土化映射逻辑"],
     ["keywords", "模型关键词判断"],
+    ["final_prompt_strategy", "最终提示词策略"],
     ["image_prompts", "模型图片提示词"]
   ]
     .map(([key, label]) => renderAnalysisSection(label, result[key]))
@@ -1320,6 +1323,111 @@ function renderModelLinkDeconstruction() {
     <h3>模型深度拆解</h3>
     ${sections || `<p>模型已返回，但没有包含链接拆解字段。你可以在“模型接口”页查看完整原始 JSON。</p>`}
   `;
+}
+
+function renderLinkScanEvidence() {
+  const scans = Array.isArray(state.latestRemoteResult?.link_scan_results)
+    ? state.latestRemoteResult.link_scan_results
+    : [];
+  if (!scans.length) return "";
+  return `
+    <h3>链接页面扫描证据</h3>
+    <div class="scan-evidence-list">
+      ${scans.map(renderScanEvidenceItem).join("")}
+    </div>
+  `;
+}
+
+function renderScanEvidenceItem(scan) {
+  const images = Array.isArray(scan.image_candidates) ? scan.image_candidates.slice(0, 6) : [];
+  const headings = Array.isArray(scan.headings) ? scan.headings.slice(0, 8) : [];
+  return `
+    <article class="scan-evidence-card">
+      <b>${escapeHtml(scan.title || scan.url || "链接扫描结果")}</b>
+      <span>${escapeHtml(scan.final_url || scan.url || "")} · ${scan.ok ? "扫描成功" : escapeHtml(scan.error || "扫描失败")}</span>
+      ${scan.description ? `<p>${escapeHtml(scan.description)}</p>` : ""}
+      ${headings.length ? `<div class="scan-tags">${headings.map((item) => `<em>H${escapeHtml(item.level)} ${escapeHtml(item.text)}</em>`).join("")}</div>` : ""}
+      ${images.length ? `
+        <div class="scan-image-list">
+          ${images.map((image) => `
+            <a href="${escapeHtml(image.src)}" target="_blank" rel="noreferrer">
+              <strong>${escapeHtml(image.type || "image")}</strong>
+              <small>${escapeHtml(image.alt || image.src)}</small>
+            </a>
+          `).join("")}
+        </div>
+      ` : `<p>未扫描到可用图片候选，模型会根据页面文本和用户输入分析。</p>`}
+    </article>
+  `;
+}
+
+function extractPromptText(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) {
+    return value.map(extractPromptText).filter(Boolean).join("\n\n");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, item]) => {
+        const text = extractPromptText(item);
+        return text ? `${formatDetailKey(key)}:\n${text}` : "";
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  return String(value).trim();
+}
+
+function buildModelGuidedPromptPack(basePack, remoteResult) {
+  if (!remoteResult || typeof remoteResult !== "object") return basePack;
+  const modelImagePrompts = extractPromptText(remoteResult.image_prompts);
+  const modelDetailPage = extractPromptText(remoteResult.detail_page);
+  const modelStrategy = extractPromptText({
+    link_analysis: remoteResult.link_analysis,
+    us_visual_deconstruction: remoteResult.us_visual_deconstruction,
+    br_visual_deconstruction: remoteResult.br_visual_deconstruction,
+    localization_map: remoteResult.localization_map,
+    final_prompt_strategy: remoteResult.final_prompt_strategy,
+    keywords: remoteResult.keywords
+  });
+  const modelImagePrompt = [
+    basePack.imagePrompt,
+    "",
+    "===== 模型链接扫描与拆解结果，以下内容必须优先用于生图提示词 =====",
+    modelStrategy,
+    "",
+    "===== 模型生成的具体图片提示词 =====",
+    modelImagePrompts
+  ].filter(Boolean).join("\n");
+  const modelDetailPrompt = [
+    basePack.detailPrompt,
+    "",
+    "===== 模型链接扫描与拆解结果，以下内容必须优先用于详情页 =====",
+    modelStrategy,
+    "",
+    "===== 模型生成的详情页内容/提示词 =====",
+    modelDetailPage
+  ].filter(Boolean).join("\n");
+
+  return {
+    ...basePack,
+    imagePrompt: modelImagePrompt,
+    detailPrompt: modelDetailPrompt,
+    modelImagePrompt,
+    modelDetailPrompt
+  };
+}
+
+function syncModelPromptsToEditors(pack) {
+  if (els.customImagePrompt && pack.modelImagePrompt && els.customImagePrompt.dataset.manual !== "true") {
+    els.customImagePrompt.value = pack.modelImagePrompt;
+    els.customImagePrompt.dataset.autoValue = pack.modelImagePrompt;
+  }
+  if (els.customDetailPrompt && pack.modelDetailPrompt && els.customDetailPrompt.dataset.manual !== "true") {
+    els.customDetailPrompt.value = pack.modelDetailPrompt;
+    els.customDetailPrompt.dataset.autoValue = pack.modelDetailPrompt;
+  }
 }
 
 function renderAnalysisSection(label, value) {
@@ -1612,7 +1720,14 @@ function buildApiDraft(pack) {
       image_generation: pack.imagePrompt,
       detail_page: pack.detailPrompt
     },
-    constraints: pack.platform.imageRules
+    constraints: pack.platform.imageRules,
+    workflow_required_order: [
+      "1. 后端先下载扫描美国产品链接和巴西产品链接页面。",
+      "2. 从页面中提取主图、详情页图片候选、图片 alt、标题、描述、模块标题和正文样本。",
+      "3. 模型先展示美国链接设计拆解，再展示巴西链接本土化拆解。",
+      "4. 综合后生成可人工修改的具体图片提示词和详情页提示词。",
+      "5. 最后才使用上传产品图作为唯一外观基准逐张生图。"
+    ]
   };
 }
 
@@ -1659,7 +1774,7 @@ async function requestRemoteImage(pack) {
     platform: els.platform.value,
     size: selectedSizeProfile.apiSize || "1024x1024",
     max_images: 1,
-    units: referenceImages.length ? Math.min(4, referenceImages.length + 1) : 1
+    units: referenceImages.length ? Math.min(MAX_REFERENCE_IMAGES, referenceImages.length + 1) : 1
   };
   const priorityPrompts = buildImagePromptQueue(pack);
   state.imageJobs = priorityPrompts.map((item) => ({
@@ -1858,7 +1973,7 @@ function buildImagePromptQueue(pack) {
 }
 
 async function getReferenceImageDataUrls() {
-  const files = state.images.slice(0, 4).map((image) => image.file).filter(Boolean);
+  const files = state.images.slice(0, MAX_REFERENCE_IMAGES).map((image) => image.file).filter(Boolean);
   if (!files.length) {
     state.referenceImageInfo = null;
     return [];
@@ -2009,7 +2124,8 @@ function escapeHtml(value) {
 
 function renderPreviews(files) {
   state.images.forEach((image) => URL.revokeObjectURL(image.url));
-  state.images = Array.from(files).map((file) => ({
+  const selectedFiles = Array.from(files).slice(0, MAX_REFERENCE_IMAGES);
+  state.images = selectedFiles.map((file) => ({
     file,
     name: file.name,
     type: file.type,
@@ -2027,6 +2143,9 @@ function renderPreviews(files) {
       `
     )
     .join("");
+  if (Array.from(files).length > MAX_REFERENCE_IMAGES) {
+    els.previewStrip.insertAdjacentHTML("beforeend", `<p class="reference-compress-note">最多使用 ${MAX_REFERENCE_IMAGES} 张产品参考图，已自动忽略多余图片。</p>`);
+  }
 }
 
 function activateTab(target) {
@@ -2054,20 +2173,26 @@ els.generateBtn.addEventListener("click", async () => {
   const pack = buildPromptPack();
   const originalText = els.generateBtn.textContent;
   els.generateBtn.disabled = true;
-  els.generateBtn.textContent = "正在生成详情页和图片...";
+  els.generateBtn.textContent = "正在扫描链接并生成提示词...";
 
   let generatedSomething = false;
+  let imagePack = pack;
 
-  const [detailSettled, imageSettled] = await Promise.allSettled([
-    requestRemoteGeneration(pack),
-    requestRemoteImage(pack)
-  ]);
+  activateTab("brief");
+  state.latestRemoteStatus = "正在下载扫描美国/巴西产品链接，分析主图、详情页图片、页面结构和本土化信息...";
+  state.latestImageStatus = "";
+  state.latestImageResult = null;
+  state.imageJobs = [];
+  renderOutputs();
 
-  if (detailSettled.status === "fulfilled") {
-    const remoteData = detailSettled.value;
+  try {
+    const remoteData = await requestRemoteGeneration(pack);
     state.latestRemoteResult = remoteData.result || remoteData.rawText || remoteData;
-    state.latestRemoteStatus = `真实 API 已返回，模型：${remoteData.model || pack.model.model}`;
+    state.latestRemoteStatus = `链接扫描和模型拆解已完成，模型：${remoteData.model || pack.model.model}。下方已展示分析逻辑和具体提示词，现在开始逐张生成图片。`;
     generatedSomething = true;
+    imagePack = buildModelGuidedPromptPack(pack, state.latestRemoteResult);
+    syncModelPromptsToEditors(imagePack);
+    state.latestPrompt = `${imagePack.imagePrompt}\n\n--- DETAILS ---\n${imagePack.detailPrompt}`;
     if (remoteData.account) {
       upsertAccount(remoteData.account);
       state.currentAccountId = remoteData.account.id;
@@ -2075,19 +2200,22 @@ els.generateBtn.addEventListener("click", async () => {
     } else {
       recordUsageEvent(pack, getRemoteTokenUsage(remoteData));
     }
-  } else {
-    const error = detailSettled.reason || {};
+    renderOutputs();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  } catch (error) {
     state.latestRemoteResult = error.payload || { message: error.message };
-    state.latestRemoteStatus = "生成接口调用失败，已回退为本地提示词生成模式。";
+    state.latestRemoteStatus = "链接扫描/模型拆解失败，已回退为本地提示词生成模式。";
+    renderOutputs();
   }
 
-  if (imageSettled.status === "fulfilled") {
-    const imageData = imageSettled.value;
+  els.generateBtn.textContent = "正在根据提示词逐张生成图片...";
+
+  try {
+    const imageData = await requestRemoteImage(imagePack);
     state.latestImageResult = imageData;
     state.latestImageStatus = `图片队列完成：成功 ${imageData.images?.length || 0} 张，失败 ${imageData.failures?.length || 0} 张，模型：${imageData.model || "gpt-image-2"}`;
     generatedSomething = true;
-  } else {
-    const error = imageSettled.reason || {};
+  } catch (error) {
     state.latestImageResult = error.payload || { message: error.message };
     state.latestImageStatus = `图片生成失败：${summarizeApiError(error)}`;
   }

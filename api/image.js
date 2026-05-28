@@ -2,6 +2,9 @@ const { getAccountByToken, publicAccount } = require("./_lib/auth");
 const { getBearerToken, handleOptions, readJson, sendJson } = require("./_lib/http");
 const { filter, supabaseRequest } = require("./_lib/supabase");
 
+const MAX_REFERENCE_IMAGES = 6;
+const MAX_REFERENCE_BYTES = 1400000;
+
 function firstImage(data) {
   const item = data?.data?.[0] || {};
   return {
@@ -99,7 +102,7 @@ async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceIma
   const referenceBlobs = (Array.isArray(referenceImages) && referenceImages.length ? referenceImages : [referenceImage])
     .map(dataUrlToBlob)
     .filter(Boolean)
-    .slice(0, 4);
+    .slice(0, MAX_REFERENCE_IMAGES);
   let editFailure = null;
   if (referenceBlobs.length) {
     const form = new FormData();
@@ -211,17 +214,17 @@ module.exports = async function handler(req, res) {
     const prompt = String(payload.prompt || "").trim();
     const size = payload.size || "1024x1024";
     if (!prompt) return sendJson(res, 400, { error: "PROMPT_REQUIRED", message: "Image prompt is required." });
-    const referenceImages = Array.isArray(payload.reference_images) ? payload.reference_images.slice(0, 4) : [];
+    const referenceImages = Array.isArray(payload.reference_images) ? payload.reference_images.slice(0, MAX_REFERENCE_IMAGES) : [];
     const referenceBytes = referenceImages.length
       ? referenceImages.reduce((sum, item) => sum + estimateBytes(item), 0)
       : estimateBytes(payload.reference_image);
-    if (referenceBytes > 900000) {
+    if (referenceBytes > MAX_REFERENCE_BYTES) {
       return sendJson(res, 413, {
         error: "REFERENCE_IMAGE_TOO_LARGE",
         message: "上传参考图体积过大，请换用更小图片或等待前端压缩后再生成。",
         details: {
           reference_bytes: referenceBytes,
-          max_reference_bytes: 900000
+          max_reference_bytes: MAX_REFERENCE_BYTES
         }
       });
     }
