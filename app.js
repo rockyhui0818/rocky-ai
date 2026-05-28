@@ -252,7 +252,7 @@ const localFallbackCredentials = {
   "review-c": "review123"
 };
 
-const PUBLIC_API_BASE_URL = "https://rocky-ai-khaki.vercel.app";
+const PUBLIC_API_BASE_URL = "";
 const MAX_REFERENCE_IMAGES = 6;
 
 const defaultUsageLogs = [
@@ -414,7 +414,7 @@ function resolveApiUrl(path) {
 }
 
 function createStaticApiError(path) {
-  const error = new Error("当前页面运行在 GitHub Pages 静态站，无法直接调用 /api 后端。请配置 Vercel 后端地址后再生成图片。");
+  const error = new Error("当前页面运行在 GitHub Pages 静态站，无法直接调用 /api 后端。请使用 Render 部署后的网址，或配置 Render 后端地址后再生成图片。");
   error.status = 405;
   error.payload = {
     error: "STATIC_HOST_API_UNAVAILABLE",
@@ -422,7 +422,7 @@ function createStaticApiError(path) {
     details: {
       requested_path: path,
       current_host: location.hostname,
-      fix: "部署 Vercel 后端，并在 app.js 的 PUBLIC_API_BASE_URL 或 window.VISION_BRZAZIL_API_BASE_URL 中填写后端域名。"
+      fix: "部署 Render Web Service 后，直接使用 Render 提供的网址；如果继续使用 GitHub Pages，需要在 window.VISION_BRZAZIL_API_BASE_URL 或 localStorage 中填写 Render 后端域名。"
     }
   };
   return error;
@@ -431,7 +431,7 @@ function createStaticApiError(path) {
 function createNetworkApiError(path, error) {
   const apiBase = getConfiguredApiBase();
   const message = apiBase
-    ? `无法连接后端 API：${apiBase}${path}。链接扫描和模型拆解没有执行，请检查 Vercel 域名是否可访问、项目是否公开、网络是否能连接 Vercel。`
+    ? `无法连接后端 API：${apiBase}${path}。链接扫描和模型拆解没有执行，请检查 Render 服务是否已部署成功、环境变量是否完整、服务是否处于运行状态。`
     : `无法连接后端 API：${path}。`;
   const wrapped = new Error(message);
   wrapped.status = 0;
