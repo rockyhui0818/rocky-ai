@@ -3,6 +3,11 @@ const { getBearerToken, handleOptions, readJson, sendJson } = require("./_lib/ht
 const { filter, supabaseRequest } = require("./_lib/supabase");
 
 const MODEL_TIMEOUT_MS = 120000;
+const LINK_SCAN_TIMEOUT_MS = 6000;
+const MAX_SCAN_LINKS = 6;
+const MAX_IMAGE_CANDIDATES = 8;
+const MAX_HEADINGS = 10;
+const PAGE_TEXT_SAMPLE_LENGTH = 900;
 
 function extractText(data) {
   return data?.choices?.[0]?.message?.content || data?.output_text || data?.content?.[0]?.text || "";
@@ -41,7 +46,7 @@ function extractImageCandidates(html, baseUrl) {
   const imgPattern = /<img\b[^>]*>/gi;
   const attrPattern = /\b(src|data-src|data-old-hires|data-a-dynamic-image|alt|title)=["']([^"']*)["']/gi;
   const tags = html.match(imgPattern) || [];
-  for (const tag of tags.slice(0, 80)) {
+  for (const tag of tags.slice(0, 48)) {
     const attrs = {};
     let attrMatch;
     while ((attrMatch = attrPattern.exec(tag))) {
@@ -68,19 +73,19 @@ function extractImageCandidates(html, baseUrl) {
   }
   return Array.from(unique.values())
     .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
-    .slice(0, 14);
+    .slice(0, MAX_IMAGE_CANDIDATES);
 }
 
 function extractHeadings(html) {
   return Array.from(html.matchAll(/<h([1-4])\b[^>]*>([\s\S]*?)<\/h\1>/gi))
     .map((match) => ({ level: Number(match[1]), text: cleanText(match[2], 220) }))
     .filter((item) => item.text)
-    .slice(0, 18);
+    .slice(0, MAX_HEADINGS);
 }
 
 async function scanProductLink(url, marketHint) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
+  const timeout = setTimeout(() => controller.abort(), LINK_SCAN_TIMEOUT_MS);
   try {
     const response = await fetch(url, {
       signal: controller.signal,
@@ -100,7 +105,7 @@ async function scanProductLink(url, marketHint) {
       description: cleanText(extractMeta(html, "description") || extractMeta(html, "og:description"), 500),
       image_candidates: extractImageCandidates(html, response.url),
       headings: extractHeadings(html),
-      page_text_sample: cleanText(html, 2600)
+      page_text_sample: cleanText(html, PAGE_TEXT_SAMPLE_LENGTH)
     };
   } catch (error) {
     return {
@@ -116,9 +121,80 @@ async function scanProductLink(url, marketHint) {
 }
 
 async function scanProductLinks(payload) {
-  const urls = Array.isArray(payload?.product?.source_urls) ? payload.product.source_urls.filter(Boolean).slice(0, 8) : [];
+  const urls = Array.isArray(payload?.product?.source_urls) ? payload.product.source_urls.filter(Boolean).slice(0, MAX_SCAN_LINKS) : [];
   const markets = Array.isArray(payload?.product?.source_markets) ? payload.product.source_markets : [];
   return Promise.all(urls.map((url, index) => scanProductLink(url, markets[index] || null)));
+}
+
+function compactProduct(product = {}) {
+  return {
+    name: product.name || "",
+    source_urls: Array.isArray(product.source_urls) ? product.source_urls.slice(0, MAX_SCAN_LINKS) : [],
+    source_domains: Array.isArray(product.source_domains) ? product.source_domains.slice(0, MAX_SCAN_LINKS) : [],
+    source_markets: Array.isArray(product.source_markets) ? product.source_markets.slice(0, MAX_SCAN_LINKS) : [],
+    selling_points: cleanText(product.selling_points, 900),
+    keyword_signals: cleanText(product.keyword_signals, 500),
+    auto_keyword_signals: cleanText(product.auto_keyword_signals, 400),
+    manual_keyword_overrides: cleanText(product.manual_keyword_overrides, 400)
+  };
+}
+
+function compactScanResult(item = {}) {
+  return {
+    url: item.url,
+    market_hint: item.market_hint,
+    ok: item.ok,
+    status: item.status,
+    final_url: item.final_url,
+    error: item.error,
+    message: item.message,
+    title: cleanText(item.title, 180),
+    description: cleanText(item.description, 320),
+    image_candidates: Array.isArray(item.image_candidates)
+      ? item.image_candidates.slice(0, MAX_IMAGE_CANDIDATES).map((image) => ({
+          type: image.type,
+          src: image.src,
+          alt: cleanText(image.alt, 120),
+          score: image.score
+        }))
+      : [],
+    headings: Array.isArray(item.headings)
+      ? item.headings.slice(0, MAX_HEADINGS).map((heading) => ({
+          level: heading.level,
+          text: cleanText(heading.text, 140)
+        }))
+      : [],
+    page_text_sample: cleanText(item.page_text_sample, PAGE_TEXT_SAMPLE_LENGTH)
+  };
+}
+
+function buildModelBody({ model, payload, includeReasoning = true }) {
+  const body = {
+    model,
+    messages: [
+      { role: "system", content: buildSystemPrompt() },
+      { role: "user", content: buildUserPrompt(payload) }
+    ],
+    response_format: { type: "json_object" }
+  };
+
+  if (includeReasoning) {
+    body.reasoning_effort = process.env.OPENAI_REASONING_EFFORT || "high";
+  }
+
+  return body;
+}
+
+function isUnsupportedReasoningError(response, data) {
+  if (response.ok) return false;
+  const message = String(data?.error?.message || data?.message || data?.rawText || "").toLowerCase();
+  return (
+    response.status === 400 &&
+    (message.includes("reasoning_effort") ||
+      message.includes("unsupported parameter") ||
+      message.includes("unknown parameter") ||
+      message.includes("unrecognized request argument"))
+  );
 }
 
 async function fetchModelJson(url, options) {
@@ -169,8 +245,8 @@ function buildUserPrompt(payload) {
         market: payload.market || "Brazil",
         account: payload.account,
         platform: payload.platform,
-        product: payload.product,
-        link_scan_results: payload.link_scan_results || [],
+        product: compactProduct(payload.product || {}),
+        link_scan_results: Array.isArray(payload.link_scan_results) ? payload.link_scan_results.map(compactScanResult) : [],
         assets: payload.assets,
         constraints: payload.constraints,
         prompt_pack: payload.prompts
@@ -215,21 +291,27 @@ module.exports = async function handler(req, res) {
     const payload = await readJson(req);
     payload.link_scan_results = await scanProductLinks(payload);
     const account = await getAccountByToken(getBearerToken(req)).catch(() => null);
-    const { response, data } = await fetchModelJson(`${baseUrl}/chat/completions`, {
+    let { response, data } = await fetchModelJson(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: buildSystemPrompt() },
-          { role: "user", content: buildUserPrompt(payload) }
-        ],
-        response_format: { type: "json_object" }
-      })
+      body: JSON.stringify(buildModelBody({ model, payload, includeReasoning: true }))
     });
+
+    let usedReasoningEffort = process.env.OPENAI_REASONING_EFFORT || "high";
+    if (isUnsupportedReasoningError(response, data)) {
+      ({ response, data } = await fetchModelJson(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(buildModelBody({ model, payload, includeReasoning: false }))
+      }));
+      usedReasoningEffort = "provider-unsupported";
+    }
 
     if (!response.ok) {
       return sendJson(res, response.status, {
@@ -279,6 +361,7 @@ module.exports = async function handler(req, res) {
     return sendJson(res, 200, {
       ok: true,
       model,
+      reasoning_effort: usedReasoningEffort,
       usage: data.usage || null,
       account: publicAccount(updatedAccount),
       result: parsed && typeof parsed === "object" ? { ...parsed, link_scan_results: payload.link_scan_results } : parsed,
