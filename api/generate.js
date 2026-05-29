@@ -61,11 +61,26 @@ function absolutizeUrl(src, baseUrl) {
   }
 }
 
+function decodeHtmlEntities(value = "") {
+  return String(value || "")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
 function cleanImageUrl(src = "") {
-  return String(src || "")
-    .replace(/&quot;.*$/i, "")
-    .replace(/%7D.*$/i, "")
+  const decoded = decodeHtmlEntities(src)
+    .replace(/\\\//g, "/")
     .replace(/\\u0026/g, "&")
+    .trim();
+  const imageMatch = decoded.match(/https?:\/\/[^\s"'<>\\]+?\.(?:jpg|jpeg|png|webp)/i);
+  return String(imageMatch?.[0] || decoded)
+    .replace(/["'}\]]+.*$/i, "")
+    .replace(/%7D.*$/i, "")
     .trim();
 }
 
@@ -78,13 +93,13 @@ function extractImageUrlsFromHtml(fragment = "") {
   for (const pattern of patterns) {
     let match;
     while ((match = pattern.exec(fragment))) {
-      const source = match[1] || "";
-      const found = Array.from(source.matchAll(/https?:\/\/[^"\\]+?\.(?:jpg|jpeg|png|webp)/gi)).map((item) => item[0]);
+      const source = decodeHtmlEntities(match[1] || "").replace(/\\\//g, "/").replace(/\\u0026/g, "&");
+      const found = Array.from(source.matchAll(/https?:\/\/[^\s"'<>\\]+?\.(?:jpg|jpeg|png|webp)/gi)).map((item) => cleanImageUrl(item[0]));
       if (found.length) urls.push(...found);
       if (/^https?:\/\//i.test(source)) urls.push(source);
     }
   }
-  return urls;
+  return urls.map(cleanImageUrl).filter(Boolean);
 }
 
 function extractHtmlSections(html, markers = []) {
@@ -112,7 +127,8 @@ function extractImageCandidates(html, baseUrl) {
 
   const dynamicImageBlocks = Array.from(html.matchAll(/data-a-dynamic-image=["']([^"']+)["']/gi));
   for (const block of dynamicImageBlocks.slice(0, 12)) {
-    const urls = Array.from(block[1].matchAll(/https?:\/\/[^"\\]+?\.(?:jpg|jpeg|png|webp)/gi)).map((match) => match[0]);
+    const decodedBlock = decodeHtmlEntities(block[1]).replace(/\\\//g, "/").replace(/\\u0026/g, "&");
+    const urls = Array.from(decodedBlock.matchAll(/https?:\/\/[^\s"'<>\\]+?\.(?:jpg|jpeg|png|webp)/gi)).map((match) => cleanImageUrl(match[0]));
     for (const src of urls.slice(0, 8)) {
       if (!src || isNonProductImage(src)) continue;
       candidates.push({
@@ -285,13 +301,17 @@ function cleanBrightDataScanResult(scan) {
     headings: usefulHeadings,
     page_text_sample: "",
     description: cleanText(scan.description, 220),
-    scan_scope: {
-      mode: "brightdata-useful-only",
-      collected: ["main_images", "detail_page_images", "review_insights"],
-      main_image_count: mainImages.length,
-      detail_page_image_count: detailImages.length,
-      ignored: ["navigation", "ads", "menus", "footer", "full_page_text", "unrelated_images"]
-    }
+    scan_scope: brightDataScanScope(mainImages.length, detailImages.length)
+  };
+}
+
+function brightDataScanScope(mainImageCount = 0, detailImageCount = 0) {
+  return {
+    mode: "brightdata-useful-only",
+    collected: ["main_images", "detail_page_images", "review_insights"],
+    main_image_count: mainImageCount,
+    detail_page_image_count: detailImageCount,
+    ignored: ["navigation", "ads", "menus", "footer", "full_page_text", "unrelated_images"]
   };
 }
 
@@ -392,7 +412,8 @@ async function scanProductLink(url, marketHint) {
         image_candidates: [],
         headings: [],
         review_insights: null,
-        page_text_sample: cleanText(html, PAGE_TEXT_SAMPLE_LENGTH)
+        page_text_sample: scanner === "brightdata" ? "" : cleanText(html, PAGE_TEXT_SAMPLE_LENGTH),
+        scan_scope: scanner === "brightdata" ? brightDataScanScope() : undefined
       };
     }
     const scan = {
@@ -472,7 +493,8 @@ function compactScanResult(item = {}) {
           text: cleanText(heading.text, 140)
         }))
       : [],
-    page_text_sample: cleanText(item.page_text_sample, PAGE_TEXT_SAMPLE_LENGTH)
+    page_text_sample: cleanText(item.page_text_sample, PAGE_TEXT_SAMPLE_LENGTH),
+    scan_scope: item.scan_scope || null
   };
 }
 
@@ -1015,18 +1037,26 @@ module.exports = async function handler(req, res) {
   const apiKey = process.env.OPENAI_API_KEY;
   const baseUrl = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
   const model = process.env.OPENAI_TEXT_MODEL || "gpt-5.5";
+  const requestId = `gen_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  let stage = "init";
 
   if (!apiKey) {
     return sendJson(res, 500, {
       error: "OPENAI_API_KEY_MISSING",
-      message: "Set OPENAI_API_KEY in your deployment environment."
+      message: "Set OPENAI_API_KEY in your deployment environment.",
+      stage,
+      request_id: requestId
     });
   }
 
   try {
+    stage = "read_request";
     const payload = await readJson(req);
+    stage = "link_scan";
     payload.link_scan_results = await scanProductLinks(payload);
+    stage = "account_lookup";
     const account = await getAccountByToken(getBearerToken(req)).catch(() => null);
+    stage = "model_analysis";
     const analysis = await runSegmentedAnalysis({
       baseUrl,
       apiKey,
@@ -1036,6 +1066,7 @@ module.exports = async function handler(req, res) {
 
     let updatedAccount = account;
     if (account) {
+      stage = "usage_log";
       const units = Number(payload?.usage_estimate?.units || 1);
       const tokens = Number(analysis.usage?.total_tokens || payload?.usage_estimate?.tokens || 0);
       await supabaseRequest("usage_logs", {
@@ -1057,6 +1088,7 @@ module.exports = async function handler(req, res) {
           }
         })
       });
+      stage = "account_quota_update";
       const rows = await supabaseRequest(`accounts?id=${filter(account.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ used: Math.min(Number(account.quota || 0), Number(account.used || 0) + units) })
@@ -1066,6 +1098,7 @@ module.exports = async function handler(req, res) {
 
     return sendJson(res, 200, {
       ok: true,
+      request_id: requestId,
       model,
       reasoning_effort: analysis.reasoning_effort,
       max_tokens: analysis.max_tokens,
@@ -1079,7 +1112,15 @@ module.exports = async function handler(req, res) {
     const isProviderError = Number(error.statusCode || 0) >= 400;
     return sendJson(res, isTimeout ? 504 : (isProviderError ? error.statusCode : 500), {
       error: isTimeout ? "MODEL_TIMEOUT" : (isProviderError ? "MODEL_REQUEST_FAILED" : "GENERATE_FAILED"),
-      message: error.message
+      message: error.message || "生成接口失败，但没有返回具体错误信息。",
+      stage,
+      request_id: requestId,
+      details: {
+        name: error.name || "",
+        code: error.code || "",
+        status_code: error.statusCode || null,
+        provider_error: error.details || null
+      }
     });
   }
 };

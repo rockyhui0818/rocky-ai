@@ -476,7 +476,13 @@ async function apiRequest(path, options = {}) {
   }
   if (!response.ok) {
     const error = new Error(data.message || data.error || `${response.status} ${response.statusText || "API 请求失败"}`);
-    error.payload = data;
+    error.payload = {
+      ...data,
+      status: response.status,
+      status_text: response.statusText || "",
+      endpoint: path,
+      raw: data.raw || (!data.message && rawText ? rawText.slice(0, 1200) : undefined)
+    };
     error.status = response.status;
     throw error;
   }
@@ -501,6 +507,9 @@ function summarizeApiError(error) {
   const providerDetails = firstFailure.details || detail;
   return [
     error?.message,
+    payload.stage ? `失败阶段：${payload.stage}` : "",
+    payload.request_id ? `请求编号：${payload.request_id}` : "",
+    payload.status ? `HTTP 状态：${payload.status}` : "",
     firstFailure.message,
     providerDetails.provider_message,
     providerDetails.reference_edit_failure?.message,
@@ -508,6 +517,34 @@ function summarizeApiError(error) {
     payload.message,
     payload.error
   ].map(readableErrorText).filter(Boolean).find((item) => String(item).trim()) || "请检查 API 配置或稍后重试。";
+}
+
+function normalizeApiErrorPayload(error, fallbackPath = "/api/generate") {
+  const payload = error?.payload && typeof error.payload === "object" ? error.payload : {};
+  if (Object.keys(payload).length) {
+    return {
+      error: payload.error || error?.name || "API_REQUEST_FAILED",
+      message: payload.message || error?.message || "接口调用失败，但后端没有返回 message。",
+      stage: payload.stage || null,
+      request_id: payload.request_id || null,
+      status: error?.status || payload.status || null,
+      endpoint: payload.endpoint || fallbackPath,
+      details: payload.details || {}
+    };
+  }
+  return {
+    error: error?.name === "AbortError" ? "REQUEST_ABORTED" : "API_REQUEST_FAILED",
+    message: error?.message || "接口调用失败，浏览器没有拿到后端返回内容。",
+    stage: "frontend_fetch",
+    request_id: null,
+    status: error?.status || 0,
+    endpoint: fallbackPath,
+    details: {
+      name: error?.name || "",
+      original_message: error?.message || "",
+      api_base: getConfiguredApiBase() || location.origin
+    }
+  };
 }
 
 function readableErrorText(value) {
@@ -2023,10 +2060,27 @@ async function requestRemoteGeneration(pack) {
     throw createNetworkApiError("/api/generate", error);
   }
 
-  const data = await response.json().catch(() => ({}));
+  const rawText = await response.text().catch(() => "");
+  let data = {};
+  try {
+    data = rawText ? JSON.parse(rawText) : {};
+  } catch {
+    data = {
+      error: "INVALID_API_RESPONSE",
+      message: cleanApiResponseText(rawText) || "后端返回了非 JSON 内容。",
+      raw: rawText.slice(0, 1200)
+    };
+  }
   if (!response.ok) {
     const error = new Error(data.message || data.error || "后端生成接口调用失败");
-    error.payload = data;
+    error.payload = {
+      ...data,
+      status: response.status,
+      status_text: response.statusText || "",
+      endpoint: "/api/generate",
+      raw: data.raw || (!data.message && rawText ? rawText.slice(0, 1200) : undefined)
+    };
+    error.status = response.status;
     throw error;
   }
   return data;
@@ -2561,8 +2615,8 @@ els.generateBtn.addEventListener("click", async () => {
     }
     renderOutputs();
   } catch (error) {
-    state.latestRemoteResult = error.payload || { message: error.message };
-    state.latestRemoteStatus = "链接扫描/模型拆解失败，已停止生成图片。当前没有调用模型分析链接，也不会使用本地提示词继续生图。";
+    state.latestRemoteResult = normalizeApiErrorPayload(error, "/api/generate");
+    state.latestRemoteStatus = `链接扫描/模型拆解失败：${summarizeApiError(error)}。已停止生成图片，不会使用本地提示词继续生图。`;
     state.latestImageResult = null;
     state.latestImageStatus = "已停止：必须先完成链接扫描和模型拆解，才会开始生成图片。";
     els.generateBtn.textContent = originalText;
