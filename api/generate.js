@@ -3,7 +3,8 @@ const { getBearerToken, handleOptions, readJson, sendJson } = require("./_lib/ht
 const { filter, supabaseRequest } = require("./_lib/supabase");
 
 const MODEL_TIMEOUT_MS = 120000;
-const LINK_SCAN_TIMEOUT_MS = 6000;
+const DIRECT_LINK_SCAN_TIMEOUT_MS = 6000;
+const BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = 60000;
 const MAX_SCAN_LINKS = 6;
 const MAX_IMAGE_CANDIDATES = 8;
 const MAX_HEADINGS = 10;
@@ -11,6 +12,7 @@ const MAX_REVIEW_SNIPPETS = 8;
 const PAGE_TEXT_SAMPLE_LENGTH = 900;
 const DEFAULT_MAX_COMPLETION_TOKENS = 900;
 const DEFAULT_SYNTHESIS_MAX_TOKENS = 1600;
+const BRIGHTDATA_API_URL = "https://api.brightdata.com/request";
 const LISTING_IMAGE_TYPES = [
   "white_main",
   "lifestyle",
@@ -61,6 +63,20 @@ function extractImageCandidates(html, baseUrl) {
   const ogImage = extractMeta(html, "og:image");
   if (ogImage) candidates.push({ type: "og:image", src: absolutizeUrl(ogImage, baseUrl), alt: "Open Graph product image" });
 
+  const dynamicImageBlocks = Array.from(html.matchAll(/data-a-dynamic-image=["']([^"']+)["']/gi));
+  for (const block of dynamicImageBlocks.slice(0, 12)) {
+    const urls = Array.from(block[1].matchAll(/https?:[^"\\]+/gi)).map((match) => match[0]);
+    for (const src of urls.slice(0, 8)) {
+      if (!src || isNonProductImage(src)) continue;
+      candidates.push({
+        type: "amazon-dynamic-image",
+        src: absolutizeUrl(src, baseUrl),
+        alt: "Amazon product gallery image",
+        score: 8
+      });
+    }
+  }
+
   const imgPattern = /<img\b[^>]*>/gi;
   const attrPattern = /\b(src|data-src|data-old-hires|data-a-dynamic-image|alt|title)=["']([^"']*)["']/gi;
   const tags = html.match(imgPattern) || [];
@@ -81,6 +97,7 @@ function extractImageCandidates(html, baseUrl) {
       scoreSource.includes("product") || scoreSource.includes("produto") ? 3 : 0,
       scoreSource.includes("detail") || scoreSource.includes("a-plus") || scoreSource.includes("aplus") ? 2 : 0,
       scoreSource.includes("hero") || scoreSource.includes("lifestyle") ? 2 : 0,
+      src.includes("m.media-amazon.com/images/I/") ? 4 : 0,
       src.length > 60 ? 1 : 0
     ].reduce((sum, item) => sum + item, 0);
     candidates.push({ type: "page-image", src: absolutizeUrl(src, baseUrl), alt, score });
@@ -102,6 +119,13 @@ function isNonProductImage(src = "") {
     value.includes("fls-na.amazon.") ||
     value.includes("/error/") ||
     value.includes("/captcha/") ||
+    value.includes("/sprites/") ||
+    value.includes("nav-sprite") ||
+    value.includes("/gno/") ||
+    value.includes("/omaha/") ||
+    value.includes("/prime/") ||
+    value.includes("/yoda/") ||
+    value.includes("fallback_cta") ||
     value.includes("transparent-pixel") ||
     value.includes("pixel.gif") ||
     value.includes("logo._")
@@ -222,18 +246,61 @@ function isBotProtectionPage(html, finalUrl = "") {
   );
 }
 
+async function fetchProductHtml(url, signal) {
+  const brightDataKey = process.env.BRIGHTDATA_API_KEY;
+  const brightDataZone = process.env.BRIGHTDATA_ZONE || "web_unlocker1";
+  if (brightDataKey) {
+    try {
+      const response = await fetch(BRIGHTDATA_API_URL, {
+        method: "POST",
+        signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${brightDataKey}`
+        },
+        body: JSON.stringify({
+          zone: brightDataZone,
+          url,
+          format: "raw"
+        })
+      });
+      const html = await response.text();
+      if (response.ok && html) {
+        return {
+          response: {
+            ok: response.ok,
+            status: response.status,
+            url
+          },
+          html,
+          scanner: "brightdata"
+        };
+      }
+    } catch {
+      // Fall through to direct fetch when Web Unlocker is unavailable.
+    }
+  }
+
+  const response = await fetch(url, {
+    signal,
+    headers: {
+      "User-Agent": "Mozilla/5.0 VISION-BRZAZIL-Link-Scanner/1.0",
+      Accept: "text/html,application/xhtml+xml"
+    }
+  });
+  return {
+    response,
+    html: await response.text(),
+    scanner: "direct-fetch"
+  };
+}
+
 async function scanProductLink(url, marketHint) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LINK_SCAN_TIMEOUT_MS);
+  const scanTimeoutMs = process.env.BRIGHTDATA_API_KEY ? BRIGHTDATA_LINK_SCAN_TIMEOUT_MS : DIRECT_LINK_SCAN_TIMEOUT_MS;
+  const timeout = setTimeout(() => controller.abort(), scanTimeoutMs);
   try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "Mozilla/5.0 VISION-BRZAZIL-Link-Scanner/1.0",
-        Accept: "text/html,application/xhtml+xml"
-      }
-    });
-    const html = await response.text();
+    const { response, html, scanner } = await fetchProductHtml(url, controller.signal);
     const title = cleanText(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "", 240);
     const blockedByProtection = isBotProtectionPage(html, response.url);
     if (blockedByProtection) {
@@ -243,6 +310,7 @@ async function scanProductLink(url, marketHint) {
         ok: false,
         status: response.status,
         final_url: response.url,
+        scanner,
         error: "LINK_SCAN_BLOCKED",
         message: "目标平台返回 Security Check/CAPTCHA 风控页，后端无法读取真实商品图片和 review。",
         title: title || "Security Check",
@@ -259,6 +327,7 @@ async function scanProductLink(url, marketHint) {
       ok: response.ok,
       status: response.status,
       final_url: response.url,
+      scanner,
       title,
       description: cleanText(extractMeta(html, "description") || extractMeta(html, "og:description"), 500),
       image_candidates: extractImageCandidates(html, response.url),
