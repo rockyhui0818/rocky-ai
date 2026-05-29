@@ -769,6 +769,61 @@ button:disabled {
   padding-left: 18px;
 }
 
+.final-prompt-panel {
+  border: 1px solid rgba(124, 58, 237, 0.28);
+  background:
+    radial-gradient(circle at 12% 0%, rgba(124, 58, 237, 0.2), transparent 32%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(247, 241, 255, 0.94));
+  padding: 18px;
+  margin: 18px 0;
+  box-shadow: 0 18px 44px rgba(67, 34, 112, 0.1);
+}
+
+.final-prompt-panel.empty {
+  border-style: dashed;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.final-prompt-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.final-prompt-grid article {
+  border: 1px solid rgba(124, 58, 237, 0.16);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 13px;
+}
+
+.final-prompt-grid b {
+  display: block;
+  color: var(--accent-dark);
+  margin-bottom: 8px;
+}
+
+.final-prompt-grid textarea {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  border: 1px solid rgba(124, 58, 237, 0.22);
+  background: #241738;
+  color: #fffaff;
+  padding: 12px;
+  font: 12px/1.62 "SFMono-Regular", Consolas, monospace;
+  outline: none;
+}
+
+.final-prompt-grid textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.16);
+}
+
+.final-prompt-grid button {
+  margin-top: 10px;
+}
+
 .generated-image-card {
   margin: 12px 0;
   border: 1px solid var(--line);
@@ -1513,6 +1568,7 @@ mark {
   .workflow-status-grid,
   .link-analysis-list,
   .direction-grid,
+  .final-prompt-grid,
   .keyword-review,
   .admin-kpis,
   .admin-create-panel,

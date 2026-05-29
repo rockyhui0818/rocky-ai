@@ -302,6 +302,8 @@ const state = {
   latestImageResult: null,
   latestImageStatus: "",
   imageJobs: [],
+  pendingImagePack: null,
+  isBusy: false,
   referenceImageInfo: null,
   authToken: localStorage.getItem("commerceStudio.authToken") || "",
   cloudMode: false,
@@ -975,9 +977,10 @@ function renderWorkflowState(items) {
 }
 
 function syncPromptEditors(pack) {
+  const pendingPack = state.pendingImagePack || null;
   [
-    { element: els.customImagePrompt, autoValue: pack.autoImagePrompt },
-    { element: els.customDetailPrompt, autoValue: pack.autoDetailPrompt }
+    { element: els.customImagePrompt, autoValue: pendingPack?.modelImagePrompt || pack.autoImagePrompt },
+    { element: els.customDetailPrompt, autoValue: pendingPack?.modelDetailPrompt || pack.autoDetailPrompt }
   ].forEach(({ element, autoValue }) => {
     if (!element) return;
     const isEditing = document.activeElement === element;
@@ -989,9 +992,39 @@ function syncPromptEditors(pack) {
   });
 }
 
+function mergeConfirmedPromptPack(basePack, pendingPack = state.pendingImagePack) {
+  if (!pendingPack) return basePack;
+  const finalImagePrompt = document.querySelector('[data-final-prompt="image"]')?.value.trim() || "";
+  const finalDetailPrompt = document.querySelector('[data-final-prompt="detail"]')?.value.trim() || "";
+  const customImagePrompt = els.customImagePrompt?.dataset.manual === "true" ? els.customImagePrompt.value.trim() : "";
+  const customDetailPrompt = els.customDetailPrompt?.dataset.manual === "true" ? els.customDetailPrompt.value.trim() : "";
+  const imagePrompt = finalImagePrompt || customImagePrompt || pendingPack.modelImagePrompt || pendingPack.imagePrompt || basePack.imagePrompt;
+  const detailPrompt = finalDetailPrompt || customDetailPrompt || pendingPack.modelDetailPrompt || pendingPack.detailPrompt || basePack.detailPrompt;
+  return {
+    ...basePack,
+    ...pendingPack,
+    productName: basePack.productName,
+    platform: basePack.platform,
+    model: basePack.model,
+    urlInfo: basePack.urlInfo,
+    sellingPoints: basePack.sellingPoints,
+    autoKeywords: basePack.autoKeywords,
+    manualKeywords: basePack.manualKeywords,
+    keywords: basePack.keywords,
+    autoImagePrompt: basePack.autoImagePrompt,
+    autoDetailPrompt: basePack.autoDetailPrompt,
+    customImagePrompt: finalImagePrompt || customImagePrompt,
+    customDetailPrompt: finalDetailPrompt || customDetailPrompt,
+    imagePrompt,
+    detailPrompt,
+    remoteImagePrompts: Array.isArray(pendingPack.remoteImagePrompts) ? pendingPack.remoteImagePrompts : []
+  };
+}
+
 function renderOutputs() {
   if (!getCurrentAccount()) return;
-  const pack = buildPromptPack();
+  const basePack = buildPromptPack();
+  const pack = mergeConfirmedPromptPack(basePack);
   syncPromptEditors(pack);
   renderAccountControls(pack);
   state.latestPrompt = `${pack.imagePrompt}\n\n--- DETAILS ---\n${pack.detailPrompt}`;
@@ -1020,6 +1053,7 @@ function renderOutputs() {
     <p>${escapeHtml(pack.urlInfo.slugTerms.join(" · ") || "未解析到有效路径词")}</p>
     <h3>逐条链接分析</h3>
     <div class="link-analysis-list">${renderLinkAnalysis(pack.urlInfo.links)}</div>
+    ${renderFinalPromptEditor(pack)}
     ${renderReviewInsightsPanel()}
     ${renderLinkScanEvidence()}
     ${renderModelLinkDeconstruction()}
@@ -1107,6 +1141,47 @@ function renderImageResult() {
       ${imageItems.length ? `<div class="generated-image-grid">${imageItems.map(renderGeneratedImageItem).join("")}</div>` : ""}
       ${!imageItems.length && state.latestImageResult ? `<div class="data-block">${escapeHtml(JSON.stringify(state.latestImageResult, null, 2))}</div>` : ""}
       ${state.latestImageResult?.revised_prompt ? `<div class="prompt-block">${escapeHtml(state.latestImageResult.revised_prompt)}</div>` : ""}
+    </section>
+  `;
+}
+
+function renderFinalPromptEditor(pack) {
+  const hasModelPrompt = Boolean(pack.modelImagePrompt || pack.modelDetailPrompt || state.latestRemoteResult);
+  if (!hasModelPrompt) {
+    return `
+      <section class="final-prompt-panel empty">
+        <div class="review-insights-heading">
+          <div>
+            <h3>最终提示词二次修改</h3>
+            <p>模型完成链接分析后，这里会展示最终图片提示词和详情页提示词。你可以人工修正后再生成图片。</p>
+          </div>
+          <span>等待模型分析</span>
+        </div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="final-prompt-panel">
+      <div class="review-insights-heading">
+        <div>
+          <h3>最终提示词二次修改</h3>
+          <p>这里展示当前真正用于后续生图和详情页的最终提示词。修改左侧编辑框后，再点击“根据已确认提示词生成图片”。</p>
+        </div>
+        <span>${pack.customImagePrompt || pack.customDetailPrompt ? "人工已修正" : "模型自动填入"}</span>
+      </div>
+      <div class="final-prompt-grid">
+        <article>
+          <b>最终图片提示词</b>
+          <textarea data-final-prompt="image" rows="9">${escapeHtml(pack.imagePrompt || "")}</textarea>
+          <button class="ghost-btn" type="button" data-apply-final-prompt="image">应用到图片提示词编辑器</button>
+        </article>
+        <article>
+          <b>最终详情页提示词</b>
+          <textarea data-final-prompt="detail" rows="9">${escapeHtml(pack.detailPrompt || "")}</textarea>
+          <button class="ghost-btn" type="button" data-apply-final-prompt="detail">应用到详情页提示词编辑器</button>
+        </article>
+      </div>
     </section>
   `;
 }
@@ -1301,8 +1376,11 @@ function renderAccountControls(pack = buildPromptPack()) {
     </div>
   `;
 
-  els.generateBtn.disabled = !isAllowed;
+  els.generateBtn.disabled = !isAllowed || state.isBusy;
   els.generateBtn.title = isAllowed ? "" : accountLimitReason(currentAccount);
+  if (isAllowed && !state.isBusy) {
+    els.generateBtn.textContent = state.pendingImagePack ? "根据已确认提示词生成图片" : "开始链接分析并生成提示词";
+  }
 }
 
 function renderLinkAnalysis(links) {
@@ -1541,6 +1619,25 @@ function syncModelPromptsToEditors(pack) {
     els.customDetailPrompt.value = pack.modelDetailPrompt;
     els.customDetailPrompt.dataset.autoValue = pack.modelDetailPrompt;
   }
+}
+
+function applyFinalPrompt(type) {
+  const source = document.querySelector(`[data-final-prompt="${type}"]`);
+  const target = type === "image" ? els.customImagePrompt : els.customDetailPrompt;
+  if (!source || !target) return;
+  target.value = source.value.trim();
+  target.dataset.manual = target.value ? "true" : "false";
+  target.dataset.autoValue = target.value;
+  state.latestPrompt = `${els.customImagePrompt?.value || ""}\n\n--- DETAILS ---\n${els.customDetailPrompt?.value || ""}`;
+  renderOutputs();
+}
+
+function invalidatePendingAnalysis(reason = "输入已变化，请重新进行链接分析。") {
+  if (!state.pendingImagePack && !state.latestRemoteResult) return;
+  state.pendingImagePack = null;
+  state.latestRemoteResult = null;
+  state.latestRemoteStatus = reason;
+  state.latestImageStatus = "";
 }
 
 function renderAnalysisSection(label, value) {
@@ -2344,9 +2441,39 @@ els.imageInput.addEventListener("change", (event) => {
 });
 
 els.generateBtn.addEventListener("click", async () => {
+  if (state.isBusy) return;
   const pack = buildPromptPack();
   const originalText = els.generateBtn.textContent;
+  state.isBusy = true;
   els.generateBtn.disabled = true;
+  if (state.pendingImagePack) {
+    els.generateBtn.textContent = "正在根据确认提示词逐张生成图片...";
+    const confirmedPack = mergeConfirmedPromptPack(pack, state.pendingImagePack);
+    state.latestPrompt = `${confirmedPack.imagePrompt}\n\n--- DETAILS ---\n${confirmedPack.detailPrompt}`;
+    state.latestImageStatus = "";
+    state.latestImageResult = null;
+    state.imageJobs = [];
+    renderOutputs();
+
+    try {
+      const imageData = await requestRemoteImage(confirmedPack);
+      state.latestImageResult = imageData;
+      state.latestImageStatus = `图片队列完成：成功 ${imageData.images?.length || 0} 张，失败 ${imageData.failures?.length || 0} 张，模型：${imageData.model || "gpt-image-2"}`;
+      state.pendingImagePack = null;
+      recordAuditEvent("generate", "根据已确认提示词生成图片", confirmedPack);
+    } catch (error) {
+      state.latestImageResult = error.payload || { message: error.message };
+      state.latestImageStatus = `图片生成失败：${summarizeApiError(error)}`;
+    }
+
+    activateTab("image");
+    els.generateBtn.textContent = originalText;
+    state.isBusy = false;
+    els.generateBtn.disabled = false;
+    renderOutputs();
+    return;
+  }
+
   els.generateBtn.textContent = "正在扫描链接并生成提示词...";
 
   let generatedSomething = false;
@@ -2357,15 +2484,17 @@ els.generateBtn.addEventListener("click", async () => {
   state.latestImageStatus = "";
   state.latestImageResult = null;
   state.imageJobs = [];
+  state.pendingImagePack = null;
   renderOutputs();
 
   try {
     const remoteData = await requestRemoteGeneration(pack);
     state.latestRemoteResult = remoteData.result || remoteData.rawText || remoteData;
-    state.latestRemoteStatus = `链接扫描和模型拆解已完成，模型：${remoteData.model || pack.model.model}。下方已展示分析逻辑和具体提示词，现在开始逐张生成图片。`;
+    state.latestRemoteStatus = `链接扫描和模型拆解已完成，模型：${remoteData.model || pack.model.model}。最终提示词已生成，请在“最终提示词二次修改”区域确认/修改，然后点击“根据已确认提示词生成图片”。`;
     generatedSomething = true;
     imagePack = buildModelGuidedPromptPack(pack, state.latestRemoteResult);
     syncModelPromptsToEditors(imagePack);
+    state.pendingImagePack = imagePack;
     state.latestPrompt = `${imagePack.imagePrompt}\n\n--- DETAILS ---\n${imagePack.detailPrompt}`;
     if (remoteData.account) {
       upsertAccount(remoteData.account);
@@ -2375,36 +2504,27 @@ els.generateBtn.addEventListener("click", async () => {
       recordUsageEvent(pack, getRemoteTokenUsage(remoteData));
     }
     renderOutputs();
-    await new Promise((resolve) => setTimeout(resolve, 250));
   } catch (error) {
     state.latestRemoteResult = error.payload || { message: error.message };
     state.latestRemoteStatus = "链接扫描/模型拆解失败，已停止生成图片。当前没有调用模型分析链接，也不会使用本地提示词继续生图。";
     state.latestImageResult = null;
     state.latestImageStatus = "已停止：必须先完成链接扫描和模型拆解，才会开始生成图片。";
     els.generateBtn.textContent = originalText;
+    state.isBusy = false;
     els.generateBtn.disabled = false;
     renderOutputs();
     activateTab("brief");
     return;
   }
 
-  els.generateBtn.textContent = "正在根据提示词逐张生成图片...";
-
-  try {
-    const imageData = await requestRemoteImage(imagePack);
-    state.latestImageResult = imageData;
-    state.latestImageStatus = `图片队列完成：成功 ${imageData.images?.length || 0} 张，失败 ${imageData.failures?.length || 0} 张，模型：${imageData.model || "gpt-image-2"}`;
-    generatedSomething = true;
-  } catch (error) {
-    state.latestImageResult = error.payload || { message: error.message };
-    state.latestImageStatus = `图片生成失败：${summarizeApiError(error)}`;
-  }
-
   if (!generatedSomething) {
     recordUsageEvent(pack);
   }
-  activateTab("image");
+  state.latestImageStatus = "等待确认：请先检查并修正最终提示词，确认后再生成整套主图和详情页图片。";
+  activateTab("brief");
   els.generateBtn.textContent = originalText;
+  state.isBusy = false;
+  els.generateBtn.disabled = false;
   renderOutputs();
 });
 
@@ -2446,6 +2566,7 @@ els.resetBtn.addEventListener("click", () => {
   state.latestImageResult = null;
   state.latestImageStatus = "";
   state.imageJobs = [];
+  state.pendingImagePack = null;
   state.referenceImageInfo = null;
   renderPreviews([]);
   renderOutputs();
@@ -2454,6 +2575,12 @@ els.resetBtn.addEventListener("click", () => {
 
 els.tabs.forEach((tab) => {
   tab.addEventListener("click", () => activateTab(tab.dataset.tab));
+});
+
+els.briefOutput.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-apply-final-prompt]");
+  if (!button) return;
+  applyFinalPrompt(button.dataset.applyFinalPrompt);
 });
 
 els.loginForm.addEventListener("submit", async (event) => {
@@ -2708,6 +2835,8 @@ function getVisibleUsageLogs() {
     element.addEventListener(eventName, () => {
       if (element === els.customImagePrompt || element === els.customDetailPrompt) {
         element.dataset.manual = element.value.trim() ? "true" : "false";
+      } else {
+        invalidatePendingAnalysis();
       }
       renderOutputs();
       maybeRecordEditEvent(element);
