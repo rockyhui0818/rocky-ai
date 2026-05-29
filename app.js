@@ -1447,7 +1447,7 @@ function renderReviewInsightsPanel() {
   const result = state.latestRemoteResult;
   const insights = result?.review_insights;
   const scans = Array.isArray(result?.link_scan_results) ? result.link_scan_results : [];
-  const scannedReviewCount = scans.filter((scan) => scan.review_insights).length;
+  const scannedReviewCount = scans.filter((scan) => hasReviewEvidence(scan.review_insights)).length;
 
   if (!result) {
     return `
@@ -1506,6 +1506,20 @@ function renderInsightValue(value) {
   return `<p>暂无提取结果</p>`;
 }
 
+function hasReviewEvidence(insights = {}) {
+  return Boolean(
+    insights &&
+    (
+      insights.rating ||
+      insights.review_count ||
+      (Array.isArray(insights.snippets) && insights.snippets.length) ||
+      (Array.isArray(insights.positive_terms) && insights.positive_terms.length) ||
+      (Array.isArray(insights.negative_terms) && insights.negative_terms.length) ||
+      (Array.isArray(insights.scene_terms) && insights.scene_terms.length)
+    )
+  );
+}
+
 function renderLinkScanEvidence() {
   const scans = Array.isArray(state.latestRemoteResult?.link_scan_results)
     ? state.latestRemoteResult.link_scan_results
@@ -1523,6 +1537,7 @@ function renderScanEvidenceItem(scan) {
   const images = Array.isArray(scan.image_candidates) ? scan.image_candidates.slice(0, 6) : [];
   const headings = Array.isArray(scan.headings) ? scan.headings.slice(0, 8) : [];
   const reviews = scan.review_insights || {};
+  const scanStatus = scan.ok ? "扫描成功" : (scan.error === "LINK_SCAN_BLOCKED" ? "平台风控拦截，未读到真实商品页" : escapeHtml(scan.error || "扫描失败"));
   const reviewBits = [
     reviews.rating ? `评分 ${reviews.rating}` : "",
     reviews.review_count ? `${reviews.review_count} 条评价` : "",
@@ -1532,7 +1547,8 @@ function renderScanEvidenceItem(scan) {
   return `
     <article class="scan-evidence-card">
       <b>${escapeHtml(scan.title || scan.url || "链接扫描结果")}</b>
-      <span>${escapeHtml(scan.final_url || scan.url || "")} · ${scan.ok ? "扫描成功" : escapeHtml(scan.error || "扫描失败")}</span>
+      <span>${escapeHtml(scan.final_url || scan.url || "")} · ${scanStatus}</span>
+      ${scan.message ? `<p>${escapeHtml(scan.message)}</p>` : ""}
       ${scan.description ? `<p>${escapeHtml(scan.description)}</p>` : ""}
       ${reviewBits.length ? `<div class="scan-tags">${reviewBits.map((item) => `<em>${escapeHtml(item)}</em>`).join("")}</div>` : ""}
       ${Array.isArray(reviews.snippets) && reviews.snippets.length ? `<p><b>Review 摘要：</b>${escapeHtml(reviews.snippets.slice(0, 2).join(" / "))}</p>` : ""}

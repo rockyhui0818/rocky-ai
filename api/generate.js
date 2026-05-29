@@ -161,9 +161,12 @@ function countTerms(text, terms) {
 function extractReviewInsights(html) {
   const snippets = extractReviewSnippets(html);
   const reviewText = snippets.join(" ");
+  const rating = extractRating(html);
+  const reviewCount = extractReviewCount(html);
+  if (!rating && !reviewCount && !snippets.length) return null;
   return {
-    rating: extractRating(html),
-    review_count: extractReviewCount(html),
+    rating,
+    review_count: reviewCount,
     snippets,
     positive_terms: countTerms(reviewText, [
       "quality", "easy", "durable", "recommend", "comfortable", "great", "excellent",
@@ -180,6 +183,23 @@ function extractReviewInsights(html) {
   };
 }
 
+function isBotProtectionPage(html, finalUrl = "") {
+  const title = cleanText(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "", 240).toLowerCase();
+  const text = cleanText(html, 1800).toLowerCase();
+  const url = String(finalUrl || "").toLowerCase();
+  return (
+    title.includes("security check") ||
+    title.includes("captcha") ||
+    title.includes("access denied") ||
+    text.includes("security check") ||
+    text.includes("verify you are human") ||
+    text.includes("unusual traffic") ||
+    text.includes("please enable cookies") ||
+    text.includes("captcha") ||
+    url.includes("captcha")
+  );
+}
+
 async function scanProductLink(url, marketHint) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), LINK_SCAN_TIMEOUT_MS);
@@ -192,13 +212,32 @@ async function scanProductLink(url, marketHint) {
       }
     });
     const html = await response.text();
+    const title = cleanText(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "", 240);
+    const blockedByProtection = isBotProtectionPage(html, response.url);
+    if (blockedByProtection) {
+      return {
+        url,
+        market_hint: marketHint,
+        ok: false,
+        status: response.status,
+        final_url: response.url,
+        error: "LINK_SCAN_BLOCKED",
+        message: "目标平台返回 Security Check/CAPTCHA 风控页，后端无法读取真实商品图片和 review。",
+        title: title || "Security Check",
+        description: "",
+        image_candidates: [],
+        headings: [],
+        review_insights: null,
+        page_text_sample: cleanText(html, PAGE_TEXT_SAMPLE_LENGTH)
+      };
+    }
     return {
       url,
       market_hint: marketHint,
       ok: response.ok,
       status: response.status,
       final_url: response.url,
-      title: cleanText(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "", 240),
+      title,
       description: cleanText(extractMeta(html, "description") || extractMeta(html, "og:description"), 500),
       image_candidates: extractImageCandidates(html, response.url),
       headings: extractHeadings(html),
@@ -297,7 +336,21 @@ function reviewEvidenceFor(scans = []) {
     title: scan.title,
     market_hint: scan.market_hint,
     review_insights: scan.review_insights || null
-  })).filter((item) => item.review_insights);
+  })).filter((item) => hasReviewEvidence(item.review_insights));
+}
+
+function hasReviewEvidence(insights = {}) {
+  return Boolean(
+    insights &&
+    (
+      insights.rating ||
+      insights.review_count ||
+      (Array.isArray(insights.snippets) && insights.snippets.length) ||
+      (Array.isArray(insights.positive_terms) && insights.positive_terms.length) ||
+      (Array.isArray(insights.negative_terms) && insights.negative_terms.length) ||
+      (Array.isArray(insights.scene_terms) && insights.scene_terms.length)
+    )
+  );
 }
 
 function imageEvidenceFor(scans = [], mode) {
