@@ -18,6 +18,7 @@ const STEP_IMAGE_LIMIT = 1;
 const MAX_IMAGE_ANALYSIS_UNITS = 10;
 const MAX_IMAGE_ANALYSIS_UNITS_PER_BUCKET = 3;
 const IMAGE_ANALYSIS_BUDGET_MS = 85000;
+const REVIEW_ANALYSIS_BUDGET_TOKENS = 450;
 const BRIGHTDATA_API_URL = "https://api.brightdata.com/request";
 const USEFUL_IMAGE_TYPES = new Set(["main-image", "detail-page-image"]);
 const LISTING_IMAGE_TYPES = [
@@ -549,6 +550,43 @@ function hasReviewEvidence(insights = {}) {
   );
 }
 
+function buildReviewModifierEvidence(scanResults = []) {
+  const grouped = splitScansByMarket(scanResults || []);
+  return {
+    us: reviewEvidenceFor(grouped.us),
+    brazil: reviewEvidenceFor(grouped.brazil),
+    other: reviewEvidenceFor(grouped.other)
+  };
+}
+
+function fallbackReviewModifierAnalysis(reviewEvidence = {}) {
+  const allEvidence = [...(reviewEvidence.us || []), ...(reviewEvidence.brazil || []), ...(reviewEvidence.other || [])];
+  const positiveTerms = [];
+  const negativeTerms = [];
+  const sceneTerms = [];
+  const snippets = [];
+  for (const item of allEvidence) {
+    const insights = item.review_insights || {};
+    for (const term of insights.positive_terms || []) if (term?.term && !positiveTerms.includes(term.term)) positiveTerms.push(term.term);
+    for (const term of insights.negative_terms || []) if (term?.term && !negativeTerms.includes(term.term)) negativeTerms.push(term.term);
+    for (const term of insights.scene_terms || []) if (term?.term && !sceneTerms.includes(term.term)) sceneTerms.push(term.term);
+    for (const snippet of insights.snippets || []) if (snippet && !snippets.includes(snippet)) snippets.push(snippet);
+  }
+  return {
+    high_frequency_praise: positiveTerms.slice(0, 5),
+    high_frequency_complaints: negativeTerms.slice(0, 5),
+    local_language: [...positiveTerms, ...negativeTerms].slice(0, 8),
+    usage_scenarios: sceneTerms.slice(0, 5),
+    competitor_weaknesses: negativeTerms.slice(0, 5),
+    prompt_modifiers: {
+      main_images: positiveTerms.slice(0, 4).map((term) => `可在主图/副图文案中自然体现 ${term}，但不改变产品外观。`),
+      detail_pages: negativeTerms.slice(0, 4).map((term) => `在详情页提前解释 ${term} 相关疑虑，降低误解和退货。`),
+      negative_constraints: ["Review 只能修饰卖点措辞、本土语言和差评预防，不能覆盖上传产品图、美国链接图片结构或真实产品外观。"]
+    },
+    source_note: snippets.length ? `基于 ${allEvidence.length} 条链接 review 信号和可见评论摘要。` : "未提取到足够 review 摘要，仅使用评分/关键词信号。"
+  };
+}
+
 function imageEvidenceFor(scans = [], mode) {
   return scans.map((scan) => ({
     url: scan.url,
@@ -626,7 +664,6 @@ function buildImageAnalysisUnits(scanResults = []) {
         image_type: image.type,
         inferred_type: classifyImageCandidate(image),
         alt: image.alt,
-        review_insights: scan.review_insights || null,
         scan_scope: scan.scan_scope || null
       });
       if (units.length >= MAX_IMAGE_ANALYSIS_UNITS) return units;
@@ -647,26 +684,36 @@ function buildSingleImageAnalysisPrompt({ unit, product }) {
     marketRole,
     typeGuide,
     "必须记录：设计架构、版式、色彩、文字/卖点、可复刻方向、必须去除的品牌/IP 元素。",
+    "不要分析 review，不要使用评价数据；本任务只处理这张图片本身。",
     "上传产品图仍是最终产品外观唯一基准；这张竞品图只提供风格、结构和内容方向。",
     "输出 JSON：{unit_id,market,section,image_role,layout,color_style,visual_hierarchy,claims_or_copy:[最多3条],localization_notes:[最多3条],prompt_takeaways:[最多4条],brand_removal:[最多3条]}。",
     JSON.stringify({ product: compactProduct(product), unit })
   ].join("\n");
 }
 
-function buildSynthesisPrompt(payload, analyses, imageUnits = []) {
+function buildReviewModifierPrompt({ reviewEvidence, product }) {
+  return [
+    "任务：只分析 review 信号，把它变成最终图片提示词的修饰层。不要分析图片，不要改变产品外观。",
+    "Review 权重低于上传产品图和美国链接图片结构；只能用于：卖点措辞校准、巴西葡语自然表达、真实使用场景、差评预防、竞品弱点补充。",
+    "输出 JSON：{high_frequency_praise:[最多5条],high_frequency_complaints:[最多5条],local_language:[最多8个],usage_scenarios:[最多5条],competitor_weaknesses:[最多5条],prompt_modifiers:{main_images:[最多5条],detail_pages:[最多5条],negative_constraints:[最多4条]},source_note}。",
+    JSON.stringify({ product: compactProduct(product), review_evidence: reviewEvidence })
+  ].join("\n");
+}
+
+function buildSynthesisPrompt(payload, analyses, imageUnits = [], reviewModifierAnalysis = {}) {
   return [
     "任务：综合逐张图片分析结果，输出最终可编辑提示词。不要重新分析原始链接，不要再请求观察其它图片。",
     "逻辑：主图 = 美国主图设计方向 + 巴西主图本土化；详情页 = 美国详情页结构 + 巴西详情页本土化；上传产品图是基础产品输入，允许参考/复刻竞品外观、包装、颜色与版式，但必须去品牌化。",
-    "Review Insights 是独立辅助模块，权重低于上传产品图和美国链接主图/详情页结构。只用于卖点校准、本土语言、使用场景、差评预防和竞品弱点，不得覆盖产品外观和设计结构。",
+    "Review Modifier 是最后的修饰层，权重低于上传产品图和美国链接主图/详情页结构。只能修饰文案、葡语、本土场景、差评预防和卖点顺序，不得覆盖产品外观和设计结构。",
     "输出 JSON 字段：",
     "workflow_analysis: {us_main,br_main,us_detail,br_detail,optimization_logic}",
-    "review_insights: {high_frequency_praise:[最多5条],high_frequency_complaints:[最多5条],local_language:[最多8个葡语/英语评价词],usage_scenarios:[最多5条],competitor_weaknesses:[最多5条],how_to_use:[最多5条说明如何放入主图/副图/详情页前几屏]}",
+    "review_insights: 直接整理 review_modifier_analysis，说明它如何修饰最终提示词。",
     "link_analysis: 最多6项短证据摘要。",
     "main_image_plan: 必须包含 white_main,lifestyle,infographic,details_specs,comparison 五类图片方向。",
     "detail_page_plan: 必须包含 hero_banner,core_features,lifestyle_usage,details_specs,faq,comparison_chart 六个详情页模块方向。",
     "keywords: {auto: 最多8个, manual: 用户人工词, final: 最多10个}。",
     "image_prompts: 生成 11 条简洁可编辑提示词对象；字段 {type,label,source_logic,br_localization,prompt}；前5条对应主图/附图类型，后6条对应详情页模块。",
-    "每条 prompt 控制在 45-75 字：上传产品图是基础产品输入；美国链接可提供外观、包装、颜色、构图、模块和风格；巴西链接提供葡语、本土场景和信任表达；禁止 logo/商标/品牌名。",
+    "每条 prompt 控制在 45-75 字：上传产品图是基础产品输入；美国链接图片提供外观、包装、颜色、构图、模块和风格；巴西链接图片提供本土场景；review_modifier_analysis 只修饰葡语文案、卖点和差评预防；禁止 logo/商标/品牌名。",
     "detail_page: {title_pt_br, bullets_pt_br: 5条以内, description_pt_br: 180字以内, faq_pt_br: 2条以内, platform_notes: 3条以内}。",
     "compliance_notes: 最多4条。",
     "usage_note: 一句话。",
@@ -678,16 +725,12 @@ function buildSynthesisPrompt(payload, analyses, imageUnits = []) {
       prompt_pack: payload.prompts,
       image_analysis_units: imageUnits,
       analyses,
-      review_evidence: {
-        us: reviewEvidenceFor(splitScansByMarket(payload.link_scan_results || []).us),
-        brazil: reviewEvidenceFor(splitScansByMarket(payload.link_scan_results || []).brazil),
-        other: reviewEvidenceFor(splitScansByMarket(payload.link_scan_results || []).other)
-      }
+      review_modifier_analysis: reviewModifierAnalysis
     })
   ].join("\n");
 }
 
-function fallbackSegmentedResult(payload, analysisFlow, analysisMeta, imageUnits = []) {
+function fallbackSegmentedResult(payload, analysisFlow, analysisMeta, imageUnits = [], reviewModifierAnalysis = null) {
   const product = compactProduct(payload.product || {});
   const manual = product.manual_keyword_overrides ? product.manual_keyword_overrides.split(/[,，\s]+/).filter(Boolean) : [];
   const auto = [
@@ -737,14 +780,8 @@ function fallbackSegmentedResult(payload, analysisFlow, analysisMeta, imageUnits
       br_detail: "无巴西详情页证据，采用本土语言、场景和信任表达。",
       optimization_logic: "链接采集结果会被拆成单图分析任务：美国图给设计结构，巴西图给本土化落地；全程禁止竞品 logo、商标和品牌名。"
     },
-    review_insights: {
-      high_frequency_praise: [],
-      high_frequency_complaints: [],
-      local_language: [],
-      usage_scenarios: [],
-      competitor_weaknesses: [],
-      how_to_use: ["无可见 review 证据时，不把 review 作为主图或详情页核心依据。"]
-    },
+    review_modifier_analysis: reviewModifierAnalysis || fallbackReviewModifierAnalysis(buildReviewModifierEvidence(payload.link_scan_results || [])),
+    review_insights: reviewModifierAnalysis || fallbackReviewModifierAnalysis(buildReviewModifierEvidence(payload.link_scan_results || [])),
     link_analysis: [],
     main_image_plan: LISTING_IMAGE_TYPES,
     detail_page_plan: DETAIL_MODULE_TYPES,
@@ -913,6 +950,13 @@ function sumUsage(usages = []) {
 async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
   const product = payload.product || {};
   const imageUnits = buildImageAnalysisUnits(payload.link_scan_results || []);
+  const reviewEvidence = buildReviewModifierEvidence(payload.link_scan_results || []);
+  let reviewModifierAnalysis = fallbackReviewModifierAnalysis(reviewEvidence);
+  let reviewModifierMeta = {
+    usage: null,
+    reasoning_effort: "fallback",
+    max_tokens: 0
+  };
   const settled = [];
   const analysisStartedAt = Date.now();
   let stoppedByBudget = false;
@@ -985,9 +1029,34 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
     max_tokens: value.max_tokens
   }]));
 
+  if ([...reviewEvidence.us, ...reviewEvidence.brazil, ...reviewEvidence.other].length) {
+    try {
+      const reviewResult = await runJsonTask({
+        baseUrl,
+        apiKey,
+        model,
+        prompt: buildReviewModifierPrompt({ reviewEvidence, product }),
+        maxTokens: REVIEW_ANALYSIS_BUDGET_TOKENS,
+        imageUrls: []
+      });
+      reviewModifierAnalysis = reviewResult.result;
+      reviewModifierMeta = {
+        usage: reviewResult.usage,
+        reasoning_effort: reviewResult.reasoning_effort,
+        max_tokens: reviewResult.max_tokens
+      };
+    } catch (error) {
+      reviewModifierAnalysis = {
+        ...reviewModifierAnalysis,
+        error: cleanText(error.message, 220),
+        source_note: `${reviewModifierAnalysis.source_note || ""} Review 模型分析失败，已使用规则降级结果。`
+      };
+    }
+  }
+
   if (!imageUnits.length) {
     return {
-      result: fallbackSegmentedResult(payload, analyses, analysisMeta, imageUnits),
+      result: fallbackSegmentedResult(payload, analyses, analysisMeta, imageUnits, reviewModifierAnalysis),
       usage: {},
       reasoning_effort: "skipped-no-links",
       max_tokens: 0
@@ -1000,16 +1069,16 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
       baseUrl,
       apiKey,
       model,
-      prompt: buildSynthesisPrompt(payload, analyses, imageUnits),
+      prompt: buildSynthesisPrompt(payload, analyses, imageUnits, reviewModifierAnalysis),
       maxTokens: Number(process.env.OPENAI_MAX_COMPLETION_TOKENS || DEFAULT_SYNTHESIS_MAX_TOKENS)
     });
   } catch (error) {
-    const fallback = fallbackSegmentedResult(payload, analyses, analysisMeta, imageUnits);
+    const fallback = fallbackSegmentedResult(payload, analyses, analysisMeta, imageUnits, reviewModifierAnalysis);
     fallback.workflow_analysis.optimization_logic = `模型综合阶段超时或失败，已保留 Bright Data 链接扫描证据并生成可编辑提示词草稿。失败原因：${cleanText(error.message, 180)}`;
     fallback.usage_note = "本次使用扫描证据降级生成，建议先人工检查最终提示词，再继续逐张生图。";
     return {
       result: fallback,
-      usage: sumUsage(settled.map(([, value]) => value.usage)),
+      usage: sumUsage([...settled.map(([, value]) => value.usage), reviewModifierMeta.usage]),
       reasoning_effort: "fallback-after-synthesis-failure",
       max_tokens: 0,
       degraded: true
@@ -1022,6 +1091,8 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
       analysis_meta: analysisMeta,
       image_analysis_units: imageUnits,
       image_analysis_results: Object.values(analyses),
+      review_modifier_analysis: reviewModifierAnalysis,
+      review_modifier_meta: reviewModifierMeta,
       image_analysis_meta: {
         mode: "one-image-per-model-call",
         unit_count: imageUnits.length,
@@ -1031,7 +1102,7 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
       },
       ...synthesis.result
     },
-    usage: sumUsage([...settled.map(([, value]) => value.usage), synthesis.usage]),
+    usage: sumUsage([...settled.map(([, value]) => value.usage), reviewModifierMeta.usage, synthesis.usage]),
     reasoning_effort: synthesis.reasoning_effort,
     max_tokens: synthesis.max_tokens,
     degraded: false

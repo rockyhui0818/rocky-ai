@@ -1512,7 +1512,7 @@ function renderImageAnalysisQueue(result = {}) {
 
 function renderReviewInsightsPanel() {
   const result = state.latestRemoteResult;
-  const insights = result?.review_insights;
+  const insights = result?.review_modifier_analysis || result?.review_insights;
   const scans = Array.isArray(result?.link_scan_results) ? result.link_scan_results : [];
   const scannedReviewCount = scans.filter((scan) => hasReviewEvidence(scan.review_insights)).length;
 
@@ -1521,7 +1521,7 @@ function renderReviewInsightsPanel() {
       <section class="review-insights-panel empty">
         <div>
           <h3>Review Insights</h3>
-          <p>点击“开始自动生成”后，这里会显示链接中提取的评分、评论摘要、高频好评点、差评点和本土语言。</p>
+          <p>点击“开始自动生成”后，这里会显示独立 review 分析。它只作为最终提示词修饰层，不参与图片结构拆解。</p>
         </div>
         <span>等待链接扫描</span>
       </section>
@@ -1536,7 +1536,9 @@ function renderReviewInsightsPanel() {
         ["本土语言表达", insights.local_language],
         ["真实使用场景", insights.usage_scenarios],
         ["竞品弱点", insights.competitor_weaknesses],
-        ["如何用于前几屏", insights.how_to_use]
+        ["主图提示词修饰", insights.prompt_modifiers?.main_images || insights.how_to_use],
+        ["详情页提示词修饰", insights.prompt_modifiers?.detail_pages],
+        ["不可覆盖约束", insights.prompt_modifiers?.negative_constraints]
       ]
     : [];
 
@@ -1544,8 +1546,8 @@ function renderReviewInsightsPanel() {
     <section class="review-insights-panel">
       <div class="review-insights-heading">
         <div>
-          <h3>Review Insights</h3>
-          <p>辅助权重：只用于卖点校准、本土语言、使用场景和差评预防，不覆盖产品图和美国主图/详情页结构。</p>
+          <h3>Review Modifier</h3>
+          <p>独立权重：Review 不进入单图结构分析，只在最后修饰提示词，用于卖点校准、本土语言、使用场景和差评预防。</p>
         </div>
         <span>${scannedReviewCount ? `${scannedReviewCount} 条链接含 review 信号` : "未提取到可见评论"}</span>
       </div>
