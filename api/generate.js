@@ -73,6 +73,7 @@ function extractImageCandidates(html, baseUrl) {
     const dynamicImage = attrs["data-a-dynamic-image"]?.match(/https?:[^"\\]+/i)?.[0] || "";
     const src = dynamicImage || attrs["data-old-hires"] || attrs["data-src"] || attrs.src || "";
     if (!src || src.startsWith("data:")) continue;
+    if (isNonProductImage(src)) continue;
     const alt = cleanText(attrs.alt || attrs.title || "", 160);
     const scoreSource = `${src} ${alt}`.toLowerCase();
     const score = [
@@ -92,6 +93,19 @@ function extractImageCandidates(html, baseUrl) {
   return Array.from(unique.values())
     .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
     .slice(0, MAX_IMAGE_CANDIDATES);
+}
+
+function isNonProductImage(src = "") {
+  const value = String(src || "").toLowerCase();
+  return (
+    value.includes("/oc-csi/") ||
+    value.includes("fls-na.amazon.") ||
+    value.includes("/error/") ||
+    value.includes("/captcha/") ||
+    value.includes("transparent-pixel") ||
+    value.includes("pixel.gif") ||
+    value.includes("logo._")
+  );
 }
 
 function extractHeadings(html) {
@@ -192,10 +206,18 @@ function isBotProtectionPage(html, finalUrl = "") {
     title.includes("captcha") ||
     title.includes("access denied") ||
     text.includes("security check") ||
+    text.includes("robot check") ||
     text.includes("verify you are human") ||
     text.includes("unusual traffic") ||
+    text.includes("automated access") ||
+    text.includes("click the button below to continue shopping") ||
+    text.includes("clique no botão abaixo para continuar comprando") ||
+    text.includes("continue shopping") ||
+    text.includes("continuar comprando") ||
+    text.includes("getting things ready") ||
     text.includes("please enable cookies") ||
     text.includes("captcha") ||
+    url.includes("/edgex/guard/") ||
     url.includes("captcha")
   );
 }
