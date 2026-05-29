@@ -13,7 +13,8 @@ const MAX_HEADINGS = 10;
 const MAX_REVIEW_SNIPPETS = 8;
 const PAGE_TEXT_SAMPLE_LENGTH = 900;
 const DEFAULT_MAX_COMPLETION_TOKENS = 900;
-const DEFAULT_SYNTHESIS_MAX_TOKENS = 1600;
+const DEFAULT_SYNTHESIS_MAX_TOKENS = 1100;
+const STEP_IMAGE_LIMIT = 2;
 const BRIGHTDATA_API_URL = "https://api.brightdata.com/request";
 const USEFUL_IMAGE_TYPES = new Set(["main-image", "detail-page-image"]);
 const LISTING_IMAGE_TYPES = [
@@ -800,7 +801,7 @@ async function requestModelWithFallback({ baseUrl, apiKey, model, messages, maxT
 }
 
 function buildUserMessage(prompt, imageUrls = []) {
-  const images = imageUrls.filter(Boolean).slice(0, 6);
+  const images = imageUrls.filter(Boolean).slice(0, STEP_IMAGE_LIMIT);
   if (!images.length) return { role: "user", content: prompt };
   return {
     role: "user",
@@ -896,13 +897,13 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
         apiKey,
         model,
         prompt,
-        maxTokens: 650,
-        imageUrls: imageUrlsFor(scans, mode, mode === "detail" ? 6 : 4)
+        maxTokens: 420,
+        imageUrls: imageUrlsFor(scans, mode, STEP_IMAGE_LIMIT)
       });
       settled.push([key, value]);
       return value.result;
     } catch (error) {
-      const fallback = { result: { error: error.message }, usage: null, reasoning_effort: process.env.OPENAI_REASONING_EFFORT || "high", max_tokens: 650 };
+      const fallback = { result: { error: error.message }, usage: null, reasoning_effort: process.env.OPENAI_REASONING_EFFORT || "high", max_tokens: 420 };
       settled.push([key, fallback]);
       return fallback.result;
     }
@@ -934,13 +935,27 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
     };
   }
 
-  const synthesis = await runJsonTask({
-    baseUrl,
-    apiKey,
-    model,
-    prompt: buildSynthesisPrompt(payload, analyses),
-    maxTokens: Number(process.env.OPENAI_MAX_COMPLETION_TOKENS || DEFAULT_SYNTHESIS_MAX_TOKENS)
-  });
+  let synthesis;
+  try {
+    synthesis = await runJsonTask({
+      baseUrl,
+      apiKey,
+      model,
+      prompt: buildSynthesisPrompt(payload, analyses),
+      maxTokens: Number(process.env.OPENAI_MAX_COMPLETION_TOKENS || DEFAULT_SYNTHESIS_MAX_TOKENS)
+    });
+  } catch (error) {
+    const fallback = fallbackSegmentedResult(payload, analyses, analysisMeta);
+    fallback.workflow_analysis.optimization_logic = `模型综合阶段超时或失败，已保留 Bright Data 链接扫描证据并生成可编辑提示词草稿。失败原因：${cleanText(error.message, 180)}`;
+    fallback.usage_note = "本次使用扫描证据降级生成，建议先人工检查最终提示词，再继续逐张生图。";
+    return {
+      result: fallback,
+      usage: sumUsage(settled.map(([, value]) => value.usage)),
+      reasoning_effort: "fallback-after-synthesis-failure",
+      max_tokens: 0,
+      degraded: true
+    };
+  }
 
   return {
     result: {
@@ -950,7 +965,8 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
     },
     usage: sumUsage([...settled.map(([, value]) => value.usage), synthesis.usage]),
     reasoning_effort: synthesis.reasoning_effort,
-    max_tokens: synthesis.max_tokens
+    max_tokens: synthesis.max_tokens,
+    degraded: false
   };
 }
 
@@ -1129,6 +1145,7 @@ module.exports = async function handler(req, res) {
     return sendJson(res, 200, {
       ok: true,
       request_id: requestId,
+      degraded: Boolean(analysis.degraded),
       model,
       reasoning_effort: analysis.reasoning_effort,
       max_tokens: analysis.max_tokens,

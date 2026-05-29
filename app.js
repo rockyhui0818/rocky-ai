@@ -2605,7 +2605,9 @@ els.generateBtn.addEventListener("click", async () => {
   try {
     const remoteData = await requestRemoteGeneration(pack);
     state.latestRemoteResult = remoteData.result || remoteData.rawText || remoteData;
-    state.latestRemoteStatus = `链接扫描和模型拆解已完成，模型：${remoteData.model || pack.model.model}。最终提示词已生成，请在“最终提示词二次修改”区域确认/修改，然后点击“根据已确认提示词生成图片”。`;
+    state.latestRemoteStatus = remoteData.degraded
+      ? `链接扫描已完成，但模型综合阶段超时，已返回可编辑提示词草稿，模型：${remoteData.model || pack.model.model}。请先人工检查“最终提示词二次修改”区域，再继续生图。`
+      : `链接扫描和模型拆解已完成，模型：${remoteData.model || pack.model.model}。最终提示词已生成，请在“最终提示词二次修改”区域确认/修改，然后点击“根据已确认提示词生成图片”。`;
     generatedSomething = true;
     imagePack = buildModelGuidedPromptPack(pack, state.latestRemoteResult);
     syncModelPromptsToEditors(imagePack);
