@@ -6,13 +6,16 @@ const MODEL_TIMEOUT_MS = 120000;
 const DIRECT_LINK_SCAN_TIMEOUT_MS = 6000;
 const BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = 60000;
 const MAX_SCAN_LINKS = 6;
-const MAX_IMAGE_CANDIDATES = 8;
+const MAX_IMAGE_CANDIDATES = 14;
+const MAX_MAIN_IMAGE_CANDIDATES = 6;
+const MAX_DETAIL_IMAGE_CANDIDATES = 8;
 const MAX_HEADINGS = 10;
 const MAX_REVIEW_SNIPPETS = 8;
 const PAGE_TEXT_SAMPLE_LENGTH = 900;
 const DEFAULT_MAX_COMPLETION_TOKENS = 900;
 const DEFAULT_SYNTHESIS_MAX_TOKENS = 1600;
 const BRIGHTDATA_API_URL = "https://api.brightdata.com/request";
+const USEFUL_IMAGE_TYPES = new Set(["main-image", "detail-page-image"]);
 const LISTING_IMAGE_TYPES = [
   "white_main",
   "lifestyle",
@@ -52,59 +55,99 @@ function extractMeta(html, name) {
 
 function absolutizeUrl(src, baseUrl) {
   try {
-    return new URL(src, baseUrl).href;
+    return new URL(cleanImageUrl(src), baseUrl).href;
   } catch {
-    return src;
+    return cleanImageUrl(src);
   }
+}
+
+function cleanImageUrl(src = "") {
+  return String(src || "")
+    .replace(/&quot;.*$/i, "")
+    .replace(/%7D.*$/i, "")
+    .replace(/\\u0026/g, "&")
+    .trim();
+}
+
+function extractImageUrlsFromHtml(fragment = "") {
+  const urls = [];
+  const patterns = [
+    /data-a-dynamic-image=["']([^"']+)["']/gi,
+    /\b(?:src|data-src|data-old-hires)=["']([^"']+)["']/gi
+  ];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(fragment))) {
+      const source = match[1] || "";
+      const found = Array.from(source.matchAll(/https?:\/\/[^"\\]+?\.(?:jpg|jpeg|png|webp)/gi)).map((item) => item[0]);
+      if (found.length) urls.push(...found);
+      if (/^https?:\/\//i.test(source)) urls.push(source);
+    }
+  }
+  return urls;
+}
+
+function extractHtmlSections(html, markers = []) {
+  const sections = [];
+  const lower = html.toLowerCase();
+  for (const marker of markers) {
+    let index = 0;
+    const needle = marker.toLowerCase();
+    while ((index = lower.indexOf(needle, index)) !== -1 && sections.length < 12) {
+      const start = Math.max(0, index - 3000);
+      const end = Math.min(html.length, index + 45000);
+      sections.push(html.slice(start, end));
+      index += needle.length;
+    }
+  }
+  return sections;
 }
 
 function extractImageCandidates(html, baseUrl) {
   const candidates = [];
   const ogImage = extractMeta(html, "og:image");
-  if (ogImage) candidates.push({ type: "og:image", src: absolutizeUrl(ogImage, baseUrl), alt: "Open Graph product image" });
+  if (ogImage && !isNonProductImage(ogImage)) {
+    candidates.push({ type: "main-image", src: absolutizeUrl(ogImage, baseUrl), alt: "Open Graph product image", score: 12 });
+  }
 
   const dynamicImageBlocks = Array.from(html.matchAll(/data-a-dynamic-image=["']([^"']+)["']/gi));
   for (const block of dynamicImageBlocks.slice(0, 12)) {
-    const urls = Array.from(block[1].matchAll(/https?:[^"\\]+/gi)).map((match) => match[0]);
+    const urls = Array.from(block[1].matchAll(/https?:\/\/[^"\\]+?\.(?:jpg|jpeg|png|webp)/gi)).map((match) => match[0]);
     for (const src of urls.slice(0, 8)) {
       if (!src || isNonProductImage(src)) continue;
       candidates.push({
-        type: "amazon-dynamic-image",
+        type: "main-image",
         src: absolutizeUrl(src, baseUrl),
         alt: "Amazon product gallery image",
-        score: 8
+        score: 12
       });
     }
   }
 
-  const imgPattern = /<img\b[^>]*>/gi;
-  const attrPattern = /\b(src|data-src|data-old-hires|data-a-dynamic-image|alt|title)=["']([^"']*)["']/gi;
-  const tags = html.match(imgPattern) || [];
-  for (const tag of tags.slice(0, 48)) {
-    const attrs = {};
-    let attrMatch;
-    while ((attrMatch = attrPattern.exec(tag))) {
-      attrs[attrMatch[1]] = attrMatch[2];
+  const detailSections = extractHtmlSections(html, [
+    "aplus",
+    "a-plus",
+    "dpx-aplus",
+    "productDescription",
+    "product-description",
+    "detail-bullets",
+    "feature-bullets"
+  ]);
+  for (const section of detailSections) {
+    for (const src of extractImageUrlsFromHtml(section).slice(0, 16)) {
+      if (!src || isNonProductImage(src)) continue;
+      candidates.push({
+        type: "detail-page-image",
+        src: absolutizeUrl(src, baseUrl),
+        alt: "Detail page/A+ content image",
+        score: src.includes("m.media-amazon.com/images/I/") ? 10 : 6
+      });
     }
-    const dynamicImage = attrs["data-a-dynamic-image"]?.match(/https?:[^"\\]+/i)?.[0] || "";
-    const src = dynamicImage || attrs["data-old-hires"] || attrs["data-src"] || attrs.src || "";
-    if (!src || src.startsWith("data:")) continue;
-    if (isNonProductImage(src)) continue;
-    const alt = cleanText(attrs.alt || attrs.title || "", 160);
-    const scoreSource = `${src} ${alt}`.toLowerCase();
-    const score = [
-      scoreSource.includes("main") ? 3 : 0,
-      scoreSource.includes("product") || scoreSource.includes("produto") ? 3 : 0,
-      scoreSource.includes("detail") || scoreSource.includes("a-plus") || scoreSource.includes("aplus") ? 2 : 0,
-      scoreSource.includes("hero") || scoreSource.includes("lifestyle") ? 2 : 0,
-      src.includes("m.media-amazon.com/images/I/") ? 4 : 0,
-      src.length > 60 ? 1 : 0
-    ].reduce((sum, item) => sum + item, 0);
-    candidates.push({ type: "page-image", src: absolutizeUrl(src, baseUrl), alt, score });
   }
 
   const unique = new Map();
   for (const item of candidates) {
+    if (!USEFUL_IMAGE_TYPES.has(item.type)) continue;
     if (!unique.has(item.src)) unique.set(item.src, item);
   }
   return Array.from(unique.values())
@@ -221,6 +264,37 @@ function extractReviewInsights(html) {
   };
 }
 
+function cleanBrightDataScanResult(scan) {
+  const allUsefulImages = Array.isArray(scan.image_candidates)
+    ? scan.image_candidates.filter((image) => USEFUL_IMAGE_TYPES.has(image.type) && image.src && !isNonProductImage(image.src))
+    : [];
+  const mainImages = allUsefulImages
+    .filter((image) => image.type === "main-image")
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+    .slice(0, MAX_MAIN_IMAGE_CANDIDATES);
+  const detailImages = allUsefulImages
+    .filter((image) => image.type === "detail-page-image")
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+    .slice(0, MAX_DETAIL_IMAGE_CANDIDATES);
+  const usefulHeadings = scan.title
+    ? [{ level: 1, text: scan.title }]
+    : [];
+  return {
+    ...scan,
+    image_candidates: [...mainImages, ...detailImages],
+    headings: usefulHeadings,
+    page_text_sample: "",
+    description: cleanText(scan.description, 220),
+    scan_scope: {
+      mode: "brightdata-useful-only",
+      collected: ["main_images", "detail_page_images", "review_insights"],
+      main_image_count: mainImages.length,
+      detail_page_image_count: detailImages.length,
+      ignored: ["navigation", "ads", "menus", "footer", "full_page_text", "unrelated_images"]
+    }
+  };
+}
+
 function isBotProtectionPage(html, finalUrl = "") {
   const title = cleanText(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "", 240).toLowerCase();
   const text = cleanText(html, 1800).toLowerCase();
@@ -321,7 +395,7 @@ async function scanProductLink(url, marketHint) {
         page_text_sample: cleanText(html, PAGE_TEXT_SAMPLE_LENGTH)
       };
     }
-    return {
+    const scan = {
       url,
       market_hint: marketHint,
       ok: response.ok,
@@ -335,6 +409,7 @@ async function scanProductLink(url, marketHint) {
       review_insights: extractReviewInsights(html),
       page_text_sample: cleanText(html, PAGE_TEXT_SAMPLE_LENGTH)
     };
+    return scanner === "brightdata" ? cleanBrightDataScanResult(scan) : scan;
   } catch (error) {
     return {
       url,
@@ -377,6 +452,7 @@ function compactScanResult(item = {}) {
     ok: item.ok,
     status: item.status,
     final_url: item.final_url,
+    scanner: item.scanner,
     error: item.error,
     message: item.message,
     title: cleanText(item.title, 180),

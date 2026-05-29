@@ -1538,7 +1538,12 @@ function renderScanEvidenceItem(scan) {
   const images = Array.isArray(scan.image_candidates) ? scan.image_candidates.slice(0, 6) : [];
   const headings = Array.isArray(scan.headings) ? scan.headings.slice(0, 8) : [];
   const reviews = scan.review_insights || {};
-  const scanStatus = scan.ok ? "扫描成功" : (scan.error === "LINK_SCAN_BLOCKED" ? "平台风控拦截，未读到真实商品页" : escapeHtml(scan.error || "扫描失败"));
+  const scannerLabel = scan.scanner === "brightdata" ? "Bright Data 精简采集" : (scan.scanner === "local-browser" ? "本机浏览器采集" : "后端直接采集");
+  const scanStatus = scan.ok ? `扫描成功 · ${scannerLabel}` : (scan.error === "LINK_SCAN_BLOCKED" ? "平台风控拦截，未读到真实商品页" : escapeHtml(scan.error || "扫描失败"));
+  const scope = scan.scan_scope || {};
+  const scopeText = scope.mode === "brightdata-useful-only"
+    ? `只采集主图 ${scope.main_image_count || 0} 张、详情页图片 ${scope.detail_page_image_count || 0} 张、Review 信息；已屏蔽导航/广告/菜单/页脚/整页正文。`
+    : "";
   const reviewBits = [
     reviews.rating ? `评分 ${reviews.rating}` : "",
     reviews.review_count ? `${reviews.review_count} 条评价` : "",
@@ -1549,6 +1554,7 @@ function renderScanEvidenceItem(scan) {
     <article class="scan-evidence-card">
       <b>${escapeHtml(scan.title || scan.url || "链接扫描结果")}</b>
       <span>${escapeHtml(scan.final_url || scan.url || "")} · ${scanStatus}</span>
+      ${scopeText ? `<p>${escapeHtml(scopeText)}</p>` : ""}
       ${scan.message ? `<p>${escapeHtml(scan.message)}</p>` : ""}
       ${scan.description ? `<p>${escapeHtml(scan.description)}</p>` : ""}
       ${reviewBits.length ? `<div class="scan-tags">${reviewBits.map((item) => `<em>${escapeHtml(item)}</em>`).join("")}</div>` : ""}
