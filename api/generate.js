@@ -1038,9 +1038,20 @@ module.exports = async function handler(req, res) {
   const baseUrl = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
   const model = process.env.OPENAI_TEXT_MODEL || "gpt-5.5";
   const requestId = `gen_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const startedAt = Date.now();
   let stage = "init";
+  const logGenerate = (event, extra = {}) => {
+    console.log(JSON.stringify({
+      event,
+      request_id: requestId,
+      stage,
+      elapsed_ms: Date.now() - startedAt,
+      ...extra
+    }));
+  };
 
   if (!apiKey) {
+    logGenerate("generate_failed", { error: "OPENAI_API_KEY_MISSING" });
     return sendJson(res, 500, {
       error: "OPENAI_API_KEY_MISSING",
       message: "Set OPENAI_API_KEY in your deployment environment.",
@@ -1052,8 +1063,18 @@ module.exports = async function handler(req, res) {
   try {
     stage = "read_request";
     const payload = await readJson(req);
+    logGenerate("generate_start", {
+      source_url_count: Array.isArray(payload?.product?.source_urls) ? payload.product.source_urls.length : 0,
+      platform: payload?.platform_key || payload?.platform || ""
+    });
     stage = "link_scan";
     payload.link_scan_results = await scanProductLinks(payload);
+    logGenerate("generate_stage_complete", {
+      completed_stage: "link_scan",
+      scan_count: payload.link_scan_results.length,
+      scan_ok_count: payload.link_scan_results.filter((scan) => scan.ok).length,
+      scanners: Array.from(new Set(payload.link_scan_results.map((scan) => scan.scanner).filter(Boolean)))
+    });
     stage = "account_lookup";
     const account = await getAccountByToken(getBearerToken(req)).catch(() => null);
     stage = "model_analysis";
@@ -1062,6 +1083,11 @@ module.exports = async function handler(req, res) {
       apiKey,
       model,
       payload
+    });
+    logGenerate("generate_stage_complete", {
+      completed_stage: "model_analysis",
+      total_tokens: Number(analysis.usage?.total_tokens || 0),
+      reasoning_effort: analysis.reasoning_effort
     });
 
     let updatedAccount = account;
@@ -1096,6 +1122,10 @@ module.exports = async function handler(req, res) {
       updatedAccount = rows[0] || account;
     }
 
+    logGenerate("generate_success", {
+      model,
+      total_tokens: Number(analysis.usage?.total_tokens || 0)
+    });
     return sendJson(res, 200, {
       ok: true,
       request_id: requestId,
@@ -1110,6 +1140,12 @@ module.exports = async function handler(req, res) {
   } catch (error) {
     const isTimeout = error.code === "MODEL_TIMEOUT";
     const isProviderError = Number(error.statusCode || 0) >= 400;
+    logGenerate("generate_failed", {
+      error: isTimeout ? "MODEL_TIMEOUT" : (isProviderError ? "MODEL_REQUEST_FAILED" : "GENERATE_FAILED"),
+      message: error.message || "",
+      code: error.code || "",
+      status_code: error.statusCode || null
+    });
     return sendJson(res, isTimeout ? 504 : (isProviderError ? error.statusCode : 500), {
       error: isTimeout ? "MODEL_TIMEOUT" : (isProviderError ? "MODEL_REQUEST_FAILED" : "GENERATE_FAILED"),
       message: error.message || "生成接口失败，但没有返回具体错误信息。",

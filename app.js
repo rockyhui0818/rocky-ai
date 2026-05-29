@@ -506,16 +506,17 @@ function summarizeApiError(error) {
   const firstFailure = failures[0] || {};
   const providerDetails = firstFailure.details || detail;
   return [
-    error?.message,
     payload.stage ? `失败阶段：${payload.stage}` : "",
     payload.request_id ? `请求编号：${payload.request_id}` : "",
-    payload.status ? `HTTP 状态：${payload.status}` : "",
+    payload.status ? `HTTP 状态：${payload.status}${payload.status_text ? ` ${payload.status_text}` : ""}` : "",
+    payload.raw ? `响应内容：${payload.raw}` : "",
+    payload.message,
+    payload.error,
+    error?.message,
     firstFailure.message,
     providerDetails.provider_message,
     providerDetails.reference_edit_failure?.message,
-    providerDetails.provider_raw,
-    payload.message,
-    payload.error
+    providerDetails.provider_raw
   ].map(readableErrorText).filter(Boolean).find((item) => String(item).trim()) || "请检查 API 配置或稍后重试。";
 }
 
@@ -528,7 +529,9 @@ function normalizeApiErrorPayload(error, fallbackPath = "/api/generate") {
       stage: payload.stage || null,
       request_id: payload.request_id || null,
       status: error?.status || payload.status || null,
+      status_text: payload.status_text || "",
       endpoint: payload.endpoint || fallbackPath,
+      raw: payload.raw || "",
       details: payload.details || {}
     };
   }
@@ -538,7 +541,9 @@ function normalizeApiErrorPayload(error, fallbackPath = "/api/generate") {
     stage: "frontend_fetch",
     request_id: null,
     status: error?.status || 0,
+    status_text: "",
     endpoint: fallbackPath,
+    raw: "",
     details: {
       name: error?.name || "",
       original_message: error?.message || "",
