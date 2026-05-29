@@ -18,6 +18,18 @@
 
 直接用浏览器打开 `index.html` 即可使用。
 
+## 本机浏览器辅助扫描
+
+Amazon、TikTok Shop 等平台经常会拦截服务器抓取，导致 VPS 后端只能拿到 `Continue shopping`、`Security Check` 或验证码页。为提高链接拆解质量，可以在使用网站前，在你的 Mac 上启动本机浏览器扫描助手：
+
+```bash
+node local-browser-scanner.js
+```
+
+启动后保持 Chrome 打开。前端会优先请求 `http://127.0.0.1:8787/scan`，使用你电脑上的 Chrome 打开产品链接，提取商品标题、评分、评论数量、商品图、详情页/A+ 图片和可见 review；本机助手不可用时会自动回退到 VPS 后端抓取。
+
+如果扫描失败，请在 Chrome 菜单中开启 `View -> Developer -> Allow JavaScript from Apple Events`，并在 Amazon/TikTok 页面手动完成一次验证后重试。
+
 ## 接入真实 API
 
 当前前端会优先调用 `/api/generate`。如果部署环境不支持后端函数，或没有配置 API Key，会自动回退到本地提示词演示模式。

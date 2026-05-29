@@ -280,6 +280,9 @@ async function scanProductLink(url, marketHint) {
 }
 
 async function scanProductLinks(payload) {
+  if (Array.isArray(payload?.link_scan_results) && payload.link_scan_results.length) {
+    return payload.link_scan_results.map(compactScanResult);
+  }
   const urls = Array.isArray(payload?.product?.source_urls) ? payload.product.source_urls.filter(Boolean).slice(0, MAX_SCAN_LINKS) : [];
   const markets = Array.isArray(payload?.product?.source_markets) ? payload.product.source_markets : [];
   return Promise.all(urls.map((url, index) => scanProductLink(url, markets[index] || null)));

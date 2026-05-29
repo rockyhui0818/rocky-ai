@@ -253,6 +253,7 @@ const localFallbackCredentials = {
 };
 
 const PUBLIC_API_BASE_URL = "";
+const LOCAL_BROWSER_SCANNER_URL = "http://127.0.0.1:8787";
 const MAX_REFERENCE_IMAGES = 6;
 
 const defaultUsageLogs = [
@@ -1958,9 +1959,42 @@ function buildApiDraft(pack) {
   };
 }
 
+async function requestLocalBrowserScan(pack) {
+  const sourceUrls = els.productUrl.value.split(/[\n,，]+/).map((item) => item.trim()).filter(Boolean);
+  if (!sourceUrls.length) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 26000);
+  try {
+    const response = await fetch(`${LOCAL_BROWSER_SCANNER_URL}/scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        urls: sourceUrls.slice(0, 6),
+        markets: pack.urlInfo.links.map((link) => ({ domain: link.domain, market: link.market, platform: link.platformGuess }))
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !Array.isArray(data.results)) return null;
+    return data.results;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function requestRemoteGeneration(pack) {
   if (isStaticPagesHost() && !getConfiguredApiBase()) {
     throw createStaticApiError("/api/generate");
+  }
+  const apiDraft = buildApiDraft(pack);
+  const localScanResults = await requestLocalBrowserScan(pack);
+  if (localScanResults?.length) {
+    state.latestRemoteStatus = `本机浏览器扫描完成：${localScanResults.filter((item) => item.ok).length}/${localScanResults.length} 条链接有可用页面证据，正在交给模型拆解...`;
+    renderOutputs();
+    apiDraft.link_scan_results = localScanResults;
+    apiDraft.scan_source = "local-browser";
   }
   let response;
   try {
@@ -1971,7 +2005,7 @@ async function requestRemoteGeneration(pack) {
         ...(state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {})
       },
       body: JSON.stringify({
-        ...buildApiDraft(pack),
+        ...apiDraft,
         platform_key: els.platform.value,
         usage_estimate: {
           units: estimateUsageUnits(pack),
