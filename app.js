@@ -1455,13 +1455,8 @@ function renderModelLinkDeconstruction() {
 
   const flow = result.analysis_flow && typeof result.analysis_flow === "object"
     ? `
-      <h4>分段模型工作流</h4>
-      <div class="direction-grid">
-        ${renderAnalysisSection("1. 美国链接主图分析", result.analysis_flow.us_main_image_analysis)}
-        ${renderAnalysisSection("2. 巴西链接主图本土化", result.analysis_flow.br_main_image_analysis)}
-        ${renderAnalysisSection("3. 美国详情页结构分析", result.analysis_flow.us_detail_page_analysis)}
-        ${renderAnalysisSection("4. 巴西详情页本土化", result.analysis_flow.br_detail_page_analysis)}
-      </div>
+      <h4>单图模型工作流</h4>
+      ${renderImageAnalysisQueue(result)}
     `
     : "";
 
@@ -1483,6 +1478,35 @@ function renderModelLinkDeconstruction() {
     <h3>模型深度拆解</h3>
     ${flow}
     ${sections || `<p>模型已返回，但没有包含链接拆解字段。你可以在“模型接口”页查看完整原始 JSON。</p>`}
+  `;
+}
+
+function renderImageAnalysisQueue(result = {}) {
+  const units = Array.isArray(result.image_analysis_units) ? result.image_analysis_units : [];
+  const analyses = Array.isArray(result.image_analysis_results)
+    ? result.image_analysis_results
+    : Object.values(result.analysis_flow || {});
+  const meta = result.image_analysis_meta || {};
+  if (!units.length && !analyses.length) {
+    return `<p>暂无单图分析队列。请确认链接扫描是否抓到主图/详情页图片。</p>`;
+  }
+  return `
+    <section class="analysis-section">
+      <b>逐张图片拆解队列</b>
+      <p>${escapeHtml(`模式：${meta.mode || "one-image-per-model-call"} · 已分析 ${meta.completed_count ?? analyses.length}/${meta.unit_count ?? units.length} 张${meta.stopped_by_budget ? " · 已按预算暂停剩余图片" : ""}`)}</p>
+      <div class="scan-image-list">
+        ${units.map((unit, index) => {
+          const analysis = analyses.find((item) => item?.unit_id === unit.id) || analyses[index] || {};
+          const takeaways = Array.isArray(analysis.prompt_takeaways) ? analysis.prompt_takeaways.slice(0, 3).join(" / ") : "";
+          return `
+            <a href="${escapeHtml(unit.image_url || "#")}" target="_blank" rel="noreferrer">
+              <strong>${escapeHtml(`#${index + 1} ${unit.market || "unknown"} · ${unit.section || "image"} · ${unit.inferred_type || unit.image_type || "image"}`)}</strong>
+              <small>${escapeHtml(analysis.skipped ? `待分析：${analysis.reason || ""}` : (takeaways || analysis.layout || unit.alt || unit.page_title || "已作为单张图片喂给模型分析"))}</small>
+            </a>
+          `;
+        }).join("")}
+      </div>
+    </section>
   `;
 }
 

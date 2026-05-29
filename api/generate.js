@@ -14,7 +14,10 @@ const MAX_REVIEW_SNIPPETS = 8;
 const PAGE_TEXT_SAMPLE_LENGTH = 900;
 const DEFAULT_MAX_COMPLETION_TOKENS = 900;
 const DEFAULT_SYNTHESIS_MAX_TOKENS = 1100;
-const STEP_IMAGE_LIMIT = 2;
+const STEP_IMAGE_LIMIT = 1;
+const MAX_IMAGE_ANALYSIS_UNITS = 10;
+const MAX_IMAGE_ANALYSIS_UNITS_PER_BUCKET = 3;
+const IMAGE_ANALYSIS_BUDGET_MS = 85000;
 const BRIGHTDATA_API_URL = "https://api.brightdata.com/request";
 const USEFUL_IMAGE_TYPES = new Set(["main-image", "detail-page-image"]);
 const LISTING_IMAGE_TYPES = [
@@ -600,35 +603,59 @@ function imageInventoryFor(scans = []) {
   return inventory.slice(0, 18);
 }
 
-function buildMainImageAnalysisPrompt({ market, scans, product, priorAnalysis }) {
+function buildImageAnalysisUnits(scanResults = []) {
+  const units = [];
+  const bucketCounts = {};
+  for (const scan of scanResults.map(compactScanResult)) {
+    const market = marketBucket(scan);
+    for (const image of scan.image_candidates || []) {
+      if (!image.src || !/^https?:\/\//i.test(image.src)) continue;
+      const isDetail = image.type === "detail-page-image";
+      const section = isDetail ? "detail" : "main";
+      const bucket = `${market}:${section}`;
+      if ((bucketCounts[bucket] || 0) >= MAX_IMAGE_ANALYSIS_UNITS_PER_BUCKET) continue;
+      bucketCounts[bucket] = (bucketCounts[bucket] || 0) + 1;
+      units.push({
+        id: `img_${units.length + 1}`,
+        market,
+        section,
+        source_url: scan.url,
+        page_title: scan.title,
+        page_description: scan.description,
+        image_url: image.src,
+        image_type: image.type,
+        inferred_type: classifyImageCandidate(image),
+        alt: image.alt,
+        review_insights: scan.review_insights || null,
+        scan_scope: scan.scan_scope || null
+      });
+      if (units.length >= MAX_IMAGE_ANALYSIS_UNITS) return units;
+    }
+  }
+  return units;
+}
+
+function buildSingleImageAnalysisPrompt({ unit, product }) {
+  const marketRole = unit.market === "brazil"
+    ? "巴西链接只做本土化分析：葡语表达、当地场景、信任点、消费者关注点。"
+    : "美国链接是主要设计方向：构图、版式、风格、色彩、信息层级、包装/外观参考。";
+  const typeGuide = unit.section === "detail"
+    ? `按详情页模块归类：${DETAIL_MODULE_TYPES.join(", ")}。`
+    : `按商品图类型归类：${LISTING_IMAGE_TYPES.join(", ")}。`;
   return [
-    `任务：逐张分析 ${market} 链接的商品图片，不只看一张主图。`,
-    "优先直接观察随消息附带的 image_url 图片；如果图片无法读取，再使用图片 URL、alt、标题和页面摘要。",
-    `必须按这些类型归类并分析：${LISTING_IMAGE_TYPES.join(", ")}。`,
-    "输出 JSON：{market,image_inventory:[{type,image_url,observations:[最多3条],layout,text_or_claims,localization_notes}],missing_types:[...],overall_style:[最多4条]}。",
-    market === "US" ? "美国链接是最终主图与附图设计方向，逐张记录白底主图、场景图、信息图、尺寸细节图、对比图的构图、文案、视觉层级。" : "巴西链接只用于本土化，逐张记录葡语表达、生活场景、信任元素、当地审美和消费者关注点。",
-    priorAnalysis ? "参考美国主图分析，只记录巴西本土化差异和可优化点，不重复美国内容。" : "",
-    "上传产品图是基础产品输入；允许参考或复刻竞品图片的外观方向、包装形态、颜色、版式和视觉风格，但必须去品牌化，不出现竞品 logo、商标、品牌名或水印。",
-    JSON.stringify({ product: compactProduct(product), prior_analysis: priorAnalysis || null, image_inventory: imageInventoryFor(scans), evidence: imageEvidenceFor(scans, "main") })
+    "任务：只分析这一张采集图片，不要分析其它图片，不要输出长文。",
+    marketRole,
+    typeGuide,
+    "必须记录：设计架构、版式、色彩、文字/卖点、可复刻方向、必须去除的品牌/IP 元素。",
+    "上传产品图仍是最终产品外观唯一基准；这张竞品图只提供风格、结构和内容方向。",
+    "输出 JSON：{unit_id,market,section,image_role,layout,color_style,visual_hierarchy,claims_or_copy:[最多3条],localization_notes:[最多3条],prompt_takeaways:[最多4条],brand_removal:[最多3条]}。",
+    JSON.stringify({ product: compactProduct(product), unit })
   ].join("\n");
 }
 
-function buildDetailPageAnalysisPrompt({ market, scans, product, priorAnalysis }) {
+function buildSynthesisPrompt(payload, analyses, imageUnits = []) {
   return [
-    `任务：逐模块分析 ${market} 链接的详情页/A+模块/长图结构。`,
-    "优先直接观察随消息附带的 image_url 图片；如果图片无法读取，再使用 image_candidates、headings 和 page_text_sample。",
-    `必须按这些详情页模块归类：${DETAIL_MODULE_TYPES.join(", ")}。`,
-    "输出 JSON：{market,module_inventory:[{type,image_url_or_section,observations:[最多3条],layout,copy_angle,localization_notes}],module_sequence:[最多6条],missing_modules:[...]}。",
-    market === "US" ? "美国链接是详情页设计结构主方向，逐模块记录 Hero、核心卖点、生活方式、细节规格、FAQ、对比图的版式、信息层级和视觉节奏。" : "巴西链接用于本土化，逐模块记录葡语、当地场景、信任表达、消费者关注点。",
-    priorAnalysis ? "参考美国详情页分析，只记录巴西本土化差异和可优化点，不重复美国内容。" : "",
-    "不要发明页面没有证据的认证、保修、折扣或平台背书。",
-    JSON.stringify({ product: compactProduct(product), prior_analysis: priorAnalysis || null, image_inventory: imageInventoryFor(scans), evidence: imageEvidenceFor(scans, "detail") })
-  ].join("\n");
-}
-
-function buildSynthesisPrompt(payload, analyses) {
-  return [
-    "任务：综合四个小分析结果，输出最终可编辑提示词。不要重新分析原始链接。",
+    "任务：综合逐张图片分析结果，输出最终可编辑提示词。不要重新分析原始链接，不要再请求观察其它图片。",
     "逻辑：主图 = 美国主图设计方向 + 巴西主图本土化；详情页 = 美国详情页结构 + 巴西详情页本土化；上传产品图是基础产品输入，允许参考/复刻竞品外观、包装、颜色与版式，但必须去品牌化。",
     "Review Insights 是独立辅助模块，权重低于上传产品图和美国链接主图/详情页结构。只用于卖点校准、本土语言、使用场景、差评预防和竞品弱点，不得覆盖产品外观和设计结构。",
     "输出 JSON 字段：",
@@ -649,6 +676,7 @@ function buildSynthesisPrompt(payload, analyses) {
       assets: payload.assets,
       constraints: payload.constraints,
       prompt_pack: payload.prompts,
+      image_analysis_units: imageUnits,
       analyses,
       review_evidence: {
         us: reviewEvidenceFor(splitScansByMarket(payload.link_scan_results || []).us),
@@ -659,7 +687,7 @@ function buildSynthesisPrompt(payload, analyses) {
   ].join("\n");
 }
 
-function fallbackSegmentedResult(payload, analysisFlow, analysisMeta) {
+function fallbackSegmentedResult(payload, analysisFlow, analysisMeta, imageUnits = []) {
   const product = compactProduct(payload.product || {});
   const manual = product.manual_keyword_overrides ? product.manual_keyword_overrides.split(/[,，\s]+/).filter(Boolean) : [];
   const auto = [
@@ -693,12 +721,21 @@ function fallbackSegmentedResult(payload, analysisFlow, analysisMeta) {
   return {
     analysis_flow: analysisFlow,
     analysis_meta: analysisMeta,
+    image_analysis_units: imageUnits,
+    image_analysis_results: Object.values(analysisFlow || {}),
+    image_analysis_meta: {
+      mode: "one-image-per-model-call",
+      unit_count: imageUnits.length,
+      completed_count: Object.values(analysisFlow || {}).filter((item) => !item?.skipped).length,
+      stopped_by_budget: false,
+      budget_ms: IMAGE_ANALYSIS_BUDGET_MS
+    },
     workflow_analysis: {
       us_main: "无美国链接证据，使用通用商品图结构。",
       br_main: "无巴西链接证据，采用巴西葡语与日常场景本土化。",
       us_detail: "无美国详情页证据，使用标准 A+ 模块结构。",
       br_detail: "无巴西详情页证据，采用本土语言、场景和信任表达。",
-      optimization_logic: "有链接时优先按美国设计结构、外观包装和巴西本土化落地；无链接时使用保守通用模板；全程禁止竞品 logo、商标和品牌名。"
+      optimization_logic: "链接采集结果会被拆成单图分析任务：美国图给设计结构，巴西图给本土化落地；全程禁止竞品 logo、商标和品牌名。"
     },
     review_insights: {
       high_frequency_praise: [],
@@ -874,50 +911,72 @@ function sumUsage(usages = []) {
 }
 
 async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
-  const grouped = splitScansByMarket(payload.link_scan_results || []);
-  const usScans = grouped.us.length ? grouped.us : grouped.other;
-  const brScans = grouped.brazil;
   const product = payload.product || {};
+  const imageUnits = buildImageAnalysisUnits(payload.link_scan_results || []);
   const settled = [];
-  const runStep = async (key, prompt, scans, mode) => {
-    if (!scans.length) {
-      const skipped = {
-        result: { skipped: true, reason: "No matching links were provided for this stage." },
-        usage: null,
-        reasoning_effort: "skipped",
-        max_tokens: 0
-      };
-      settled.push([key, skipped]);
-      return skipped.result;
-    }
-
+  const analysisStartedAt = Date.now();
+  let stoppedByBudget = false;
+  const runUnit = async (unit) => {
     try {
       const value = await runJsonTask({
         baseUrl,
         apiKey,
         model,
-        prompt,
-        maxTokens: 420,
-        imageUrls: imageUrlsFor(scans, mode, STEP_IMAGE_LIMIT)
+        prompt: buildSingleImageAnalysisPrompt({ unit, product }),
+        maxTokens: 360,
+        imageUrls: [unit.image_url]
       });
-      settled.push([key, value]);
+      settled.push([unit.id, value]);
       return value.result;
     } catch (error) {
-      const fallback = { result: { error: error.message }, usage: null, reasoning_effort: process.env.OPENAI_REASONING_EFFORT || "high", max_tokens: 420 };
-      settled.push([key, fallback]);
+      const fallback = {
+        result: {
+          unit_id: unit.id,
+          market: unit.market,
+          section: unit.section,
+          image_url: unit.image_url,
+          image_role: unit.inferred_type,
+          error: error.message,
+          prompt_takeaways: [
+            unit.market === "brazil" ? "使用巴西本土语言和场景做本地化参考。" : "使用美国链接图片作为设计结构和视觉风格参考。",
+            unit.section === "detail" ? "参考详情页模块信息层级。" : "参考商品图构图和卖点表达。",
+            "必须去除竞品 logo、品牌名、商标和水印。"
+          ]
+        },
+        usage: null,
+        reasoning_effort: process.env.OPENAI_REASONING_EFFORT || "high",
+        max_tokens: 360
+      };
+      settled.push([unit.id, fallback]);
       return fallback.result;
     }
   };
 
-  const [usMain, usDetail] = await Promise.all([
-    runStep("us_main_image_analysis", buildMainImageAnalysisPrompt({ market: "US", scans: usScans, product }), usScans, "main"),
-    runStep("us_detail_page_analysis", buildDetailPageAnalysisPrompt({ market: "US", scans: usScans, product }), usScans, "detail")
-  ]);
-
-  await Promise.all([
-    runStep("br_main_image_analysis", buildMainImageAnalysisPrompt({ market: "Brazil", scans: brScans, product, priorAnalysis: usMain }), brScans, "main"),
-    runStep("br_detail_page_analysis", buildDetailPageAnalysisPrompt({ market: "Brazil", scans: brScans, product, priorAnalysis: usDetail }), brScans, "detail")
-  ]);
+  for (const unit of imageUnits) {
+    if (Date.now() - analysisStartedAt > IMAGE_ANALYSIS_BUDGET_MS) {
+      stoppedByBudget = true;
+      settled.push([unit.id, {
+        result: {
+          unit_id: unit.id,
+          market: unit.market,
+          section: unit.section,
+          image_url: unit.image_url,
+          image_role: unit.inferred_type,
+          skipped: true,
+          reason: "image-analysis-budget-exceeded",
+          prompt_takeaways: [
+            unit.market === "brazil" ? "待分析：巴西本土化参考图。" : "待分析：美国设计结构参考图。",
+            "接口先返回已完成分析，避免浏览器/Nginx 长请求断开。"
+          ]
+        },
+        usage: null,
+        reasoning_effort: "skipped-budget",
+        max_tokens: 0
+      }]);
+      continue;
+    }
+    await runUnit(unit);
+  }
 
   const analyses = Object.fromEntries(settled.map(([key, value]) => [key, value.result]));
   const analysisMeta = Object.fromEntries(settled.map(([key, value]) => [key, {
@@ -926,9 +985,9 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
     max_tokens: value.max_tokens
   }]));
 
-  if (!usScans.length && !brScans.length) {
+  if (!imageUnits.length) {
     return {
-      result: fallbackSegmentedResult(payload, analyses, analysisMeta),
+      result: fallbackSegmentedResult(payload, analyses, analysisMeta, imageUnits),
       usage: {},
       reasoning_effort: "skipped-no-links",
       max_tokens: 0
@@ -941,11 +1000,11 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
       baseUrl,
       apiKey,
       model,
-      prompt: buildSynthesisPrompt(payload, analyses),
+      prompt: buildSynthesisPrompt(payload, analyses, imageUnits),
       maxTokens: Number(process.env.OPENAI_MAX_COMPLETION_TOKENS || DEFAULT_SYNTHESIS_MAX_TOKENS)
     });
   } catch (error) {
-    const fallback = fallbackSegmentedResult(payload, analyses, analysisMeta);
+    const fallback = fallbackSegmentedResult(payload, analyses, analysisMeta, imageUnits);
     fallback.workflow_analysis.optimization_logic = `模型综合阶段超时或失败，已保留 Bright Data 链接扫描证据并生成可编辑提示词草稿。失败原因：${cleanText(error.message, 180)}`;
     fallback.usage_note = "本次使用扫描证据降级生成，建议先人工检查最终提示词，再继续逐张生图。";
     return {
@@ -961,6 +1020,15 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
     result: {
       analysis_flow: analyses,
       analysis_meta: analysisMeta,
+      image_analysis_units: imageUnits,
+      image_analysis_results: Object.values(analyses),
+      image_analysis_meta: {
+        mode: "one-image-per-model-call",
+        unit_count: imageUnits.length,
+        completed_count: settled.filter(([, value]) => !value.result?.skipped).length,
+        stopped_by_budget: stoppedByBudget,
+        budget_ms: IMAGE_ANALYSIS_BUDGET_MS
+      },
       ...synthesis.result
     },
     usage: sumUsage([...settled.map(([, value]) => value.usage), synthesis.usage]),
