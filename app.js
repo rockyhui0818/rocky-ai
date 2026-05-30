@@ -2070,51 +2070,53 @@ async function requestRemoteGeneration(pack) {
     apiDraft.link_scan_results = localScanResults;
     apiDraft.scan_source = "local-browser";
   }
-  let response;
-  try {
-    response = await fetch(resolveApiUrl("/api/generate"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {})
-      },
-      body: JSON.stringify({
-        ...apiDraft,
-        platform_key: els.platform.value,
-        usage_estimate: {
-          units: estimateUsageUnits(pack),
-          tokens: estimateTokenUsage(pack)
-        }
-      })
-    });
-  } catch (error) {
-    throw createNetworkApiError("/api/generate", error);
-  }
+  const jobResponse = await apiRequest("/api/generate-job", {
+    method: "POST",
+    body: JSON.stringify({
+      ...apiDraft,
+      platform_key: els.platform.value,
+      usage_estimate: {
+        units: estimateUsageUnits(pack),
+        tokens: estimateTokenUsage(pack)
+      }
+    })
+  });
+  return pollGenerateJob(jobResponse.job?.id);
+}
 
-  const rawText = await response.text().catch(() => "");
-  let data = {};
-  try {
-    data = rawText ? JSON.parse(rawText) : {};
-  } catch {
-    data = {
-      error: "INVALID_API_RESPONSE",
-      message: cleanApiResponseText(rawText) || "后端返回了非 JSON 内容。",
-      raw: rawText.slice(0, 1200)
-    };
-  }
-  if (!response.ok) {
-    const error = new Error(data.message || data.error || "后端生成接口调用失败");
-    error.payload = {
-      ...data,
-      status: response.status,
-      status_text: response.statusText || "",
-      endpoint: "/api/generate",
-      raw: data.raw || (!data.message && rawText ? rawText.slice(0, 1200) : undefined)
-    };
-    error.status = response.status;
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollGenerateJob(jobId) {
+  if (!jobId) {
+    const error = new Error("后端没有返回任务 ID。");
+    error.payload = { error: "JOB_ID_MISSING", message: error.message, endpoint: "/api/generate-job" };
     throw error;
   }
-  return data;
+  const startedAt = Date.now();
+  const maxWaitMs = 12 * 60 * 1000;
+  while (Date.now() - startedAt < maxWaitMs) {
+    await wait(3000);
+    const data = await apiRequest(`/api/generate-status?id=${encodeURIComponent(jobId)}`, { method: "GET" });
+    const job = data.job || {};
+    state.latestRemoteStatus = `${job.message || "后台任务运行中..."}${job.progress != null ? `（${job.progress}%）` : ""}`;
+    renderOutputs();
+    if (job.status === "success") return job.result;
+    if (job.status === "error") {
+      const error = new Error(job.error?.message || job.message || "后台生成任务失败。");
+      error.payload = {
+        ...(job.error || {}),
+        endpoint: "/api/generate-status",
+        stage: job.stage,
+        job_id: job.id
+      };
+      throw error;
+    }
+  }
+  const error = new Error("后台任务等待超时，请稍后刷新或重新开始。");
+  error.payload = { error: "JOB_POLL_TIMEOUT", message: error.message, endpoint: "/api/generate-status", job_id: jobId };
+  throw error;
 }
 
 function getRemoteTokenUsage(remoteData) {
@@ -2621,7 +2623,7 @@ els.generateBtn.addEventListener("click", async () => {
   let imagePack = pack;
 
   activateTab("brief");
-  state.latestRemoteStatus = "正在下载扫描美国/巴西产品链接，分析主图、详情页图片、页面结构和本土化信息...";
+  state.latestRemoteStatus = "正在创建后台分析任务；页面会自动轮询进度，请不要重复点击。";
   state.latestImageStatus = "";
   state.latestImageResult = null;
   state.imageJobs = [];

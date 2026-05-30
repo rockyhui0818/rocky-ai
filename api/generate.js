@@ -1134,6 +1134,111 @@ async function fetchModelJson(url, options) {
   }
 }
 
+async function runGenerateWorkflow({ payload, token = "", requestId = `gen_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, onProgress = () => {} }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  const baseUrl = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
+  const model = process.env.OPENAI_TEXT_MODEL || "gpt-5.5";
+  const startedAt = Date.now();
+  let stage = "init";
+  const logGenerate = (event, extra = {}) => {
+    console.log(JSON.stringify({
+      event,
+      request_id: requestId,
+      stage,
+      elapsed_ms: Date.now() - startedAt,
+      ...extra
+    }));
+  };
+
+  if (!apiKey) {
+    const error = new Error("Set OPENAI_API_KEY in your deployment environment.");
+    error.code = "OPENAI_API_KEY_MISSING";
+    throw error;
+  }
+
+  stage = "link_scan";
+  onProgress({ status: "running", stage, progress: 15, message: "正在通过 Bright Data 扫描主图、详情页图片和 review..." });
+  logGenerate("generate_start", {
+    source_url_count: Array.isArray(payload?.product?.source_urls) ? payload.product.source_urls.length : 0,
+    platform: payload?.platform_key || payload?.platform || ""
+  });
+  payload.link_scan_results = await scanProductLinks(payload);
+  logGenerate("generate_stage_complete", {
+    completed_stage: "link_scan",
+    scan_count: payload.link_scan_results.length,
+    scan_ok_count: payload.link_scan_results.filter((scan) => scan.ok).length,
+    scanners: Array.from(new Set(payload.link_scan_results.map((scan) => scan.scanner).filter(Boolean)))
+  });
+
+  stage = "account_lookup";
+  onProgress({ status: "running", stage, progress: 35, message: "链接扫描完成，正在准备账号与模型分析..." });
+  const account = await getAccountByToken(token).catch(() => null);
+
+  stage = "model_analysis";
+  onProgress({ status: "running", stage, progress: 45, message: "正在逐张分析采集图片，并独立分析 Review Modifier..." });
+  const analysis = await runSegmentedAnalysis({
+    baseUrl,
+    apiKey,
+    model,
+    payload
+  });
+  logGenerate("generate_stage_complete", {
+    completed_stage: "model_analysis",
+    total_tokens: Number(analysis.usage?.total_tokens || 0),
+    reasoning_effort: analysis.reasoning_effort
+  });
+
+  let updatedAccount = account;
+  if (account) {
+    stage = "usage_log";
+    onProgress({ status: "running", stage, progress: 90, message: "模型分析完成，正在记录账号用量..." });
+    const units = Number(payload?.usage_estimate?.units || 1);
+    const tokens = Number(analysis.usage?.total_tokens || payload?.usage_estimate?.tokens || 0);
+    await supabaseRequest("usage_logs", {
+      method: "POST",
+      body: JSON.stringify({
+        account_id: account.id,
+        type: "generate",
+        action: payload?.product?.name ? `生成 ${payload.product.name}` : "生成商品方案",
+        platform: payload?.platform_key || payload?.platform || "all",
+        model: "openai",
+        units,
+        tokens,
+        success: true,
+        metadata: {
+          provider_model: model,
+          product: payload?.product,
+          usage: analysis.usage || null,
+          workflow: "background_segmented_link_analysis"
+        }
+      })
+    });
+    stage = "account_quota_update";
+    const rows = await supabaseRequest(`accounts?id=${filter(account.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ used: Math.min(Number(account.quota || 0), Number(account.used || 0) + units) })
+    });
+    updatedAccount = rows[0] || account;
+  }
+
+  logGenerate("generate_success", {
+    model,
+    total_tokens: Number(analysis.usage?.total_tokens || 0)
+  });
+  return {
+    ok: true,
+    request_id: requestId,
+    degraded: Boolean(analysis.degraded),
+    model,
+    reasoning_effort: analysis.reasoning_effort,
+    max_tokens: analysis.max_tokens,
+    usage: analysis.usage || null,
+    account: publicAccount(updatedAccount),
+    result: { ...analysis.result, link_scan_results: payload.link_scan_results },
+    rawText: ""
+  };
+}
+
 function buildSystemPrompt() {
   return [
     "You are VISION BRZAZIL's fast ecommerce link-analysis engine.",
@@ -1189,119 +1294,24 @@ module.exports = async function handler(req, res) {
     return sendJson(res, 405, { error: "METHOD_NOT_ALLOWED" });
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  const baseUrl = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
-  const model = process.env.OPENAI_TEXT_MODEL || "gpt-5.5";
   const requestId = `gen_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  const startedAt = Date.now();
   let stage = "init";
-  const logGenerate = (event, extra = {}) => {
-    console.log(JSON.stringify({
-      event,
-      request_id: requestId,
-      stage,
-      elapsed_ms: Date.now() - startedAt,
-      ...extra
-    }));
-  };
-
-  if (!apiKey) {
-    logGenerate("generate_failed", { error: "OPENAI_API_KEY_MISSING" });
-    return sendJson(res, 500, {
-      error: "OPENAI_API_KEY_MISSING",
-      message: "Set OPENAI_API_KEY in your deployment environment.",
-      stage,
-      request_id: requestId
-    });
-  }
 
   try {
     stage = "read_request";
     const payload = await readJson(req);
-    logGenerate("generate_start", {
-      source_url_count: Array.isArray(payload?.product?.source_urls) ? payload.product.source_urls.length : 0,
-      platform: payload?.platform_key || payload?.platform || ""
+    const result = await runGenerateWorkflow({
+      payload,
+      token: getBearerToken(req),
+      requestId,
+      onProgress: (progress) => {
+        stage = progress.stage || stage;
+      }
     });
-    stage = "link_scan";
-    payload.link_scan_results = await scanProductLinks(payload);
-    logGenerate("generate_stage_complete", {
-      completed_stage: "link_scan",
-      scan_count: payload.link_scan_results.length,
-      scan_ok_count: payload.link_scan_results.filter((scan) => scan.ok).length,
-      scanners: Array.from(new Set(payload.link_scan_results.map((scan) => scan.scanner).filter(Boolean)))
-    });
-    stage = "account_lookup";
-    const account = await getAccountByToken(getBearerToken(req)).catch(() => null);
-    stage = "model_analysis";
-    const analysis = await runSegmentedAnalysis({
-      baseUrl,
-      apiKey,
-      model,
-      payload
-    });
-    logGenerate("generate_stage_complete", {
-      completed_stage: "model_analysis",
-      total_tokens: Number(analysis.usage?.total_tokens || 0),
-      reasoning_effort: analysis.reasoning_effort
-    });
-
-    let updatedAccount = account;
-    if (account) {
-      stage = "usage_log";
-      const units = Number(payload?.usage_estimate?.units || 1);
-      const tokens = Number(analysis.usage?.total_tokens || payload?.usage_estimate?.tokens || 0);
-      await supabaseRequest("usage_logs", {
-        method: "POST",
-        body: JSON.stringify({
-          account_id: account.id,
-          type: "generate",
-          action: payload?.product?.name ? `生成 ${payload.product.name}` : "生成商品方案",
-          platform: payload?.platform_key || payload?.platform || "all",
-          model: "openai",
-          units,
-          tokens,
-          success: true,
-          metadata: {
-            provider_model: model,
-            product: payload?.product,
-            usage: analysis.usage || null,
-            workflow: "segmented_link_analysis"
-          }
-        })
-      });
-      stage = "account_quota_update";
-      const rows = await supabaseRequest(`accounts?id=${filter(account.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ used: Math.min(Number(account.quota || 0), Number(account.used || 0) + units) })
-      });
-      updatedAccount = rows[0] || account;
-    }
-
-    logGenerate("generate_success", {
-      model,
-      total_tokens: Number(analysis.usage?.total_tokens || 0)
-    });
-    return sendJson(res, 200, {
-      ok: true,
-      request_id: requestId,
-      degraded: Boolean(analysis.degraded),
-      model,
-      reasoning_effort: analysis.reasoning_effort,
-      max_tokens: analysis.max_tokens,
-      usage: analysis.usage || null,
-      account: publicAccount(updatedAccount),
-      result: { ...analysis.result, link_scan_results: payload.link_scan_results },
-      rawText: ""
-    });
+    return sendJson(res, 200, result);
   } catch (error) {
     const isTimeout = error.code === "MODEL_TIMEOUT";
     const isProviderError = Number(error.statusCode || 0) >= 400;
-    logGenerate("generate_failed", {
-      error: isTimeout ? "MODEL_TIMEOUT" : (isProviderError ? "MODEL_REQUEST_FAILED" : "GENERATE_FAILED"),
-      message: error.message || "",
-      code: error.code || "",
-      status_code: error.statusCode || null
-    });
     return sendJson(res, isTimeout ? 504 : (isProviderError ? error.statusCode : 500), {
       error: isTimeout ? "MODEL_TIMEOUT" : (isProviderError ? "MODEL_REQUEST_FAILED" : "GENERATE_FAILED"),
       message: error.message || "生成接口失败，但没有返回具体错误信息。",
@@ -1316,3 +1326,5 @@ module.exports = async function handler(req, res) {
     });
   }
 };
+
+module.exports.runGenerateWorkflow = runGenerateWorkflow;

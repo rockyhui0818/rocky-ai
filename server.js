@@ -8,6 +8,8 @@ loadEnvFile();
 const handlers = {
   "/api/health": require("./api/health"),
   "/api/generate": require("./api/generate"),
+  "/api/generate-job": require("./api/generate-job"),
+  "/api/generate-status": require("./api/generate-status"),
   "/api/image": require("./api/image"),
   "/api/usage": require("./api/usage"),
   "/api/auth/login": require("./api/auth/login"),
