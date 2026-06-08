@@ -4,6 +4,7 @@ const { filter, supabaseRequest } = require("./_lib/supabase");
 
 const MAX_REFERENCE_IMAGES = 6;
 const MAX_REFERENCE_BYTES = 1400000;
+const MAX_IMAGE_CONCURRENCY = 4;
 const PROVIDER_TIMEOUT_MS = Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 90000);
 const VERIFIED_IMAGE_BASE_URL = "http://154.64.230.35:3000/v1";
 
@@ -109,6 +110,12 @@ function normalizeImageBaseUrl(value) {
 function normalizeImageModel(model) {
   const candidate = String(model || "").trim();
   return candidate || "gpt-image-2-pro";
+}
+
+function normalizeImageConcurrency(value) {
+  const requested = Number(value || MAX_IMAGE_CONCURRENCY);
+  if (!Number.isFinite(requested)) return MAX_IMAGE_CONCURRENCY;
+  return Math.max(1, Math.min(Math.floor(requested), MAX_IMAGE_CONCURRENCY));
 }
 
 function publicProviderConfig(baseUrl, model) {
@@ -326,12 +333,13 @@ async function runImageWorkflow({ payload, token }) {
   const prompts = Array.isArray(payload.prompts) && payload.prompts.length
     ? payload.prompts
     : [{ type: payload.type || "main", prompt }];
-  const images = [];
+  const imageSlots = [];
   const modes = new Set();
   const failures = [];
   const maxImages = Math.max(1, Math.min(Number(payload.max_images || 3), 4));
+  const concurrency = normalizeImageConcurrency(process.env.OPENAI_IMAGE_CONCURRENCY);
 
-  for (const item of prompts.slice(0, maxImages)) {
+  async function generateImageItem(item, index) {
     const finalPrompt = [
       String(item.prompt || prompt),
       "",
@@ -367,13 +375,13 @@ async function runImageWorkflow({ payload, token }) {
         });
       }
       modes.add(result.mode);
-      images.push({
+      imageSlots[index] = {
         type: item.type || "image",
         label: item.label || item.type || "图片",
         targetSpec: item.targetSpec || null,
         prompt: finalPrompt,
         ...firstImage(result.data)
-      });
+      };
     } catch (itemError) {
       failures.push({
         type: item.type || "image",
@@ -384,6 +392,14 @@ async function runImageWorkflow({ payload, token }) {
       });
     }
   }
+
+  const imageItems = prompts.slice(0, maxImages);
+  for (let index = 0; index < imageItems.length; index += concurrency) {
+    const batch = imageItems.slice(index, index + concurrency);
+    await Promise.all(batch.map((item, offset) => generateImageItem(item, index + offset)));
+  }
+
+  const images = imageSlots.filter(Boolean);
 
   if (!images.length && failures.length) {
     const error = new Error(failures[0]?.message || "All image generation requests failed.");

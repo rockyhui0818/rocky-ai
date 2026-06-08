@@ -255,6 +255,7 @@ const localFallbackCredentials = {
 const PUBLIC_API_BASE_URL = "";
 const LOCAL_BROWSER_SCANNER_URL = "http://127.0.0.1:8787";
 const MAX_REFERENCE_IMAGES = 6;
+const IMAGE_BATCH_SIZE = 4;
 
 const defaultUsageLogs = [
   {
@@ -2147,7 +2148,7 @@ async function requestRemoteImage(pack) {
     message: "等待生成"
   }));
   state.latestImageResult = { ok: true, images: [], failures: [] };
-  state.latestImageStatus = `图片队列已创建：共 ${state.imageJobs.length} 张，将逐张生成。`;
+  state.latestImageStatus = `图片队列已创建：共 ${state.imageJobs.length} 张，将按每批 ${IMAGE_BATCH_SIZE} 张并行生成。`;
   renderOutputs();
 
   const images = [];
@@ -2157,14 +2158,19 @@ async function requestRemoteImage(pack) {
   let size = selectedSizeProfile.apiSize || "1024x1024";
   let account = null;
 
-  for (let index = 0; index < priorityPrompts.length; index += 1) {
-    const item = priorityPrompts[index];
-    state.imageJobs[index] = {
-      ...state.imageJobs[index],
-      status: "running",
-      message: "正在调用图片模型，请稍候..."
-    };
-    state.latestImageStatus = `正在生成第 ${index + 1}/${priorityPrompts.length} 张：${item.label}`;
+  for (let index = 0; index < priorityPrompts.length; index += IMAGE_BATCH_SIZE) {
+    const batchPrompts = priorityPrompts.slice(index, index + IMAGE_BATCH_SIZE);
+    const batchStart = index + 1;
+    const batchEnd = index + batchPrompts.length;
+    batchPrompts.forEach((item, offset) => {
+      const jobIndex = index + offset;
+      state.imageJobs[jobIndex] = {
+        ...state.imageJobs[jobIndex],
+        status: "running",
+        message: "正在批量调用图片模型，请稍候..."
+      };
+    });
+    state.latestImageStatus = `正在生成第 ${batchStart}-${batchEnd}/${priorityPrompts.length} 张（每批 ${IMAGE_BATCH_SIZE} 张）：${batchPrompts.map((item) => item.label).join("、")}`;
     renderOutputs();
 
     try {
@@ -2172,55 +2178,64 @@ async function requestRemoteImage(pack) {
         method: "POST",
         body: JSON.stringify({
           ...basePayload,
-          prompts: [item]
+          prompts: batchPrompts,
+          max_images: batchPrompts.length
         })
       });
-      state.imageJobs[index] = {
-        ...state.imageJobs[index],
-        message: "后台图片任务已创建，正在轮询结果..."
-      };
+      batchPrompts.forEach((item, offset) => {
+        const jobIndex = index + offset;
+        state.imageJobs[jobIndex] = {
+          ...state.imageJobs[jobIndex],
+          message: "后台图片任务已创建，正在轮询结果..."
+        };
+      });
       renderOutputs();
       const data = await pollGenerateJob(jobResponse.job?.id);
       const itemImages = data.images || (data.image ? [data.image] : []);
-      const firstImage = itemImages[0] ? {
-        ...itemImages[0],
-        type: itemImages[0].type || item.type,
-        label: itemImages[0].label || item.label,
-        targetSpec: itemImages[0].targetSpec || item.targetSpec || null
-      } : null;
-      if (firstImage) images.push(firstImage);
       failures.push(...(data.failures || []));
       if (data.mode) modes.add(data.mode);
       model = data.model || model;
       size = data.size || size;
       account = data.account || account;
-      state.imageJobs[index] = {
-        ...state.imageJobs[index],
-        status: firstImage ? "success" : "error",
-        message: firstImage ? "生成完成，可下载高清 PNG。" : "未返回图片，请查看失败原因。",
-        image: firstImage || null
-      };
+      batchPrompts.forEach((item, offset) => {
+        const jobIndex = index + offset;
+        const rawImage = itemImages[offset] || itemImages.find((image) => image.type === item.type);
+        const firstImage = rawImage ? {
+          ...rawImage,
+          type: rawImage.type || item.type,
+          label: rawImage.label || item.label,
+          targetSpec: rawImage.targetSpec || item.targetSpec || null
+        } : null;
+        if (firstImage) images.push(firstImage);
+        state.imageJobs[jobIndex] = {
+          ...state.imageJobs[jobIndex],
+          status: firstImage ? "success" : "error",
+          message: firstImage ? "生成完成，可下载高清 PNG。" : "未返回图片，请查看失败原因。",
+          image: firstImage || null
+        };
+      });
       state.latestImageResult = { ok: true, model, size, mode: Array.from(modes).join(","), images, failures, image: images[0] || {}, account };
-      state.latestImageStatus = firstImage
-        ? `第 ${index + 1}/${priorityPrompts.length} 张已完成：${item.label}`
-        : `第 ${index + 1}/${priorityPrompts.length} 张未返回图片：${item.label}`;
+      state.latestImageStatus = `第 ${batchStart}-${batchEnd}/${priorityPrompts.length} 张批次已完成。`;
       renderOutputs();
     } catch (error) {
-      const failure = {
-        type: item.type || "image",
-        label: item.label || "图片",
-        targetSpec: item.targetSpec || null,
-        message: summarizeApiError(error),
-        details: error?.payload?.details || error?.payload || null
-      };
-      failures.push(failure);
-      state.imageJobs[index] = {
-        ...state.imageJobs[index],
-        status: "error",
-        message: failure.message
-      };
+      batchPrompts.forEach((item, offset) => {
+        const jobIndex = index + offset;
+        const failure = {
+          type: item.type || "image",
+          label: item.label || "图片",
+          targetSpec: item.targetSpec || null,
+          message: summarizeApiError(error),
+          details: error?.payload?.details || error?.payload || null
+        };
+        failures.push(failure);
+        state.imageJobs[jobIndex] = {
+          ...state.imageJobs[jobIndex],
+          status: "error",
+          message: failure.message
+        };
+      });
       state.latestImageResult = { ok: false, model, size, mode: Array.from(modes).join(","), images, failures, image: images[0] || {}, account };
-      state.latestImageStatus = `第 ${index + 1}/${priorityPrompts.length} 张生成失败：${item.label}`;
+      state.latestImageStatus = `第 ${batchStart}-${batchEnd}/${priorityPrompts.length} 张批次生成失败。`;
       renderOutputs();
     }
   }

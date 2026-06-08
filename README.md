@@ -44,6 +44,7 @@ node local-browser-scanner.js
 - `OPENAI_IMAGE_API_KEY`: 图片生成专用 API Key；不填时才回退使用 `OPENAI_API_KEY`
 - `OPENAI_IMAGE_BASE_URL`: 图片生成专用 OpenAI 兼容接口地址，当前可用地址为 `http://154.64.230.35:3000/v1`；不填时才回退使用 `OPENAI_BASE_URL`
 - `OPENAI_IMAGE_MODEL`: 图片生成模型，当前可用模型为 `gpt-image-2-pro`
+- `OPENAI_IMAGE_CONCURRENCY`: 图片生成批内并发数，默认和上限为 `4`；11 张图会按 4/4/3 分批执行
 - `BRIGHTDATA_API_KEY`: Bright Data Web Unlocker API Key，用于优先解锁 Amazon/TikTok 等会拦截服务器抓取的平台
 - `BRIGHTDATA_ZONE`: Bright Data zone 名称，默认 `web_unlocker1`
 - `SUPABASE_URL`: Supabase Project URL
