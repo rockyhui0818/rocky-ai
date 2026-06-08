@@ -4,7 +4,7 @@ const { filter, supabaseRequest } = require("./_lib/supabase");
 
 const MODEL_TIMEOUT_MS = 240000;
 const DIRECT_LINK_SCAN_TIMEOUT_MS = 6000;
-const BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = 60000;
+const BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = 90000;
 const MAX_SCAN_LINKS = 6;
 const MAX_IMAGE_CANDIDATES = 36;
 const MAX_MAIN_IMAGE_CANDIDATES = 12;
@@ -21,7 +21,7 @@ const IMAGE_ANALYSIS_BUDGET_MS = 220000;
 const REVIEW_ANALYSIS_BUDGET_TOKENS = 900;
 const BRIGHTDATA_API_URL = "https://api.brightdata.com/request";
 const USEFUL_IMAGE_TYPES = new Set(["main-image", "detail-page-image"]);
-const MIN_PRODUCTION_BRIGHTDATA_TIMEOUT_MS = 60000;
+const MIN_PRODUCTION_BRIGHTDATA_TIMEOUT_MS = 90000;
 const LISTING_IMAGE_TYPES = [
   "white_main",
   "lifestyle",
@@ -218,6 +218,66 @@ function extractDynamicImageUrls(value = "") {
   return [...urls, ...found].filter(Boolean);
 }
 
+function chooseAmazonGalleryUrl(item = {}) {
+  if (!item || typeof item !== "object") return "";
+  const preferred = item.hiRes || item.large || item.main || item.variant || item.thumb;
+  return cleanImageUrl(preferred || "");
+}
+
+function extractBalancedJsonArray(source = "", startIndex = 0) {
+  const openIndex = source.indexOf("[", startIndex);
+  if (openIndex < 0) return "";
+  let depth = 0;
+  let quote = "";
+  let escaped = false;
+  for (let index = openIndex; index < source.length; index += 1) {
+    const char = source[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = "";
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === "[") depth += 1;
+    if (char === "]") {
+      depth -= 1;
+      if (depth === 0) return source.slice(openIndex, index + 1);
+    }
+  }
+  return "";
+}
+
+function extractAmazonCarouselGalleryUrls(html = "") {
+  const source = decodeHtmlEntities(html).replace(/\\\//g, "/").replace(/\\u0026/g, "&");
+  const urls = [];
+  const markers = [/colorImages\s*:\s*\{\s*initial\s*:/gi, /"colorImages"\s*:\s*\{\s*"initial"\s*:/gi, /'colorImages'\s*:\s*\{\s*'initial'\s*:/gi];
+  for (const marker of markers) {
+    let match;
+    while ((match = marker.exec(source))) {
+      const arraySource = extractBalancedJsonArray(source, marker.lastIndex);
+      if (!arraySource) continue;
+      try {
+        const items = JSON.parse(arraySource);
+        for (const item of Array.isArray(items) ? items : []) {
+          const clean = chooseAmazonGalleryUrl(item);
+          if (clean) urls.push(clean);
+        }
+      } catch {
+        urls.push(...extractDynamicImageUrls(arraySource));
+      }
+    }
+  }
+  return Array.from(new Set(urls.map(cleanImageUrl).filter(Boolean)));
+}
+
 function extractImageUrlsFromHtml(fragment = "") {
   const urls = [];
   const patterns = [
@@ -282,22 +342,30 @@ function extractImageCandidates(html, baseUrl) {
 
   const dynamicImageBlocks = Array.from(html.matchAll(/data-a-dynamic-image=(["'])([\s\S]*?)\1/gi));
   let galleryIndex = 0;
+  const addMainGalleryImage = (src, sourceMarker = "product-gallery", confidence = "high") => {
+    if (!src || isNonProductImage(src)) return;
+    galleryIndex += 1;
+    const role = galleryIndex === 1 ? "white_main" : "supporting";
+    candidates.push(enrichImageCandidate(
+      {
+        type: "main-image",
+        src: absolutizeUrl(src, baseUrl),
+        alt: galleryIndex === 1 ? "Amazon product gallery hero/main image" : `Amazon product gallery image ${galleryIndex}`,
+        score: galleryIndex === 1 ? 14 : 12
+      },
+      { area: "main", index: galleryIndex, role, sourceMarker, confidence }
+    ));
+  };
   for (const block of dynamicImageBlocks.slice(0, 12)) {
     const urls = extractDynamicImageUrls(block[2]);
     for (const src of urls.slice(0, 8)) {
-      if (!src || isNonProductImage(src)) continue;
-      galleryIndex += 1;
-      const role = galleryIndex === 1 ? "white_main" : "supporting";
-      candidates.push(enrichImageCandidate(
-        {
-          type: "main-image",
-          src: absolutizeUrl(src, baseUrl),
-          alt: galleryIndex === 1 ? "Amazon product gallery hero/main image" : `Amazon product gallery image ${galleryIndex}`,
-          score: galleryIndex === 1 ? 14 : 12
-        },
-        { area: "main", index: galleryIndex, role, sourceMarker: "data-a-dynamic-image", confidence: "high" }
-      ));
+      addMainGalleryImage(src, "data-a-dynamic-image", "high");
     }
+  }
+  for (const src of extractAmazonCarouselGalleryUrls(html).slice(0, 16)) {
+    const cleanSrc = cleanImageUrl(src);
+    if (!cleanSrc || candidates.some((item) => cleanImageUrl(item.src) === cleanSrc)) continue;
+    addMainGalleryImage(cleanSrc, "colorImages.initial", "high");
   }
 
   const detailMarkers = [

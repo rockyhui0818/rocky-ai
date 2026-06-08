@@ -69,7 +69,7 @@ async function run() {
   assert.strictEqual(payload.diagnostics.image_model.model, "gpt-image-2-pro");
   assert.strictEqual(payload.diagnostics.image_model.concurrency, 1);
   assert.strictEqual(payload.diagnostics.link_scanner.mode, "brightdata-required");
-  assert.strictEqual(payload.diagnostics.link_scanner.brightdata_timeout_ms, 60000);
+  assert.strictEqual(payload.diagnostics.link_scanner.brightdata_timeout_ms, 90000);
   assert(!JSON.stringify(payload).includes("sk-image"), "health diagnostics must not leak API keys.");
 }
 

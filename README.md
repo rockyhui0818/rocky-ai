@@ -47,7 +47,7 @@ node local-browser-scanner.js
 - `OPENAI_IMAGE_CONCURRENCY`: 图片生成批内并发数，当前供应商建议保持 `1`；可临时调到 `2-4` 测试，但并发过高容易触发供应商失败
 - `BRIGHTDATA_API_KEY`: Bright Data Web Unlocker API Key，用于优先解锁 Amazon/TikTok 等会拦截服务器抓取的平台
 - `BRIGHTDATA_ZONE`: Bright Data zone 名称，默认 `web_unlocker1`
-- `BRIGHTDATA_LINK_SCAN_TIMEOUT_MS`: Bright Data 链接扫描超时，默认 `60000`；配置 Bright Data 后所有链接读取都会强制走 Bright Data，不再降级直连原始商品页
+- `BRIGHTDATA_LINK_SCAN_TIMEOUT_MS`: Bright Data 链接扫描超时，默认 `90000`；配置 Bright Data 后所有链接读取都会强制走 Bright Data，不再降级直连原始商品页
 - `SUPABASE_URL`: Supabase Project URL
 - `SUPABASE_SERVICE_ROLE_KEY`: Supabase service_role key，仅放后端环境变量，不能暴露到前端
 - `SESSION_SECRET`: 任意长随机字符串，用于签发登录 token
