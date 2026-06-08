@@ -69,9 +69,9 @@ async function run() {
   const mainImages = result.image_candidates.filter((image) => image.type === "main-image");
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.scanner, "brightdata");
-  assert(mainImages.length >= 9, "Amazon carousel left/right gallery images must be collected as main images.");
+  assert.strictEqual(mainImages.length, 8, "Amazon carousel left/right gallery images should be reduced to the common 7-8 image set.");
   assert(mainImages.some((image) => image.source_marker === "colorImages.initial"), "carousel images must keep their gallery source marker.");
-  assert(mainImages.some((image) => /主图图库第 9 张/.test(image.source_position || "")), "carousel order must preserve later gallery positions.");
+  assert(mainImages.some((image) => /主图图库第 8 张/.test(image.source_position || "")), "carousel order must preserve the common gallery positions.");
   assert.strictEqual(result.scan_scope.main_image_count, mainImages.length);
 }
 

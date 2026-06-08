@@ -72,8 +72,8 @@ async function run() {
   const mainImages = result.image_candidates.filter((image) => image.type === "main-image");
   const detailImagesResult = result.image_candidates.filter((image) => image.type === "detail-page-image");
   assert.strictEqual(result.ok, true);
-  assert(mainImages.length >= 30, "large main gallery evidence should be preserved beyond twelve images.");
-  assert(detailImagesResult.length >= 10, "detail/A+ images must survive even when the main gallery is large.");
+  assert.strictEqual(mainImages.length, 8, "large main galleries should be reduced to the common 7-8 image set.");
+  assert.strictEqual(detailImagesResult.length, 7, "detail/A+ evidence should keep the common 5-7 image set.");
   assert.strictEqual(result.scan_scope.detail_page_image_count, detailImagesResult.length);
 }
 

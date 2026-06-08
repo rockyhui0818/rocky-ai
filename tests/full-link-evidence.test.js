@@ -78,8 +78,8 @@ async function run() {
   assert.match(result.description, /Complete product description/);
   assert(result.page_text_sample.includes("Clinically inspired whitening strip set"), "product body text must be preserved for model analysis");
   assert(result.page_text_sample.includes("Review 1:"), "review text must be preserved in the page sample");
-  assert(result.image_candidates.filter((image) => image.type === "main-image").length >= 8, "main image evidence should not be capped at six");
-  assert(result.image_candidates.filter((image) => image.type === "detail-page-image").length >= 10, "detail page image evidence should include A+ images");
+  assert.strictEqual(result.image_candidates.filter((image) => image.type === "main-image").length, 8, "main image evidence should follow the common 7-8 image set");
+  assert.strictEqual(result.image_candidates.filter((image) => image.type === "detail-page-image").length, 7, "detail page image evidence should follow the common 5-7 image set");
   assert.strictEqual(result.review_insights.review_count, 456);
   assert(result.review_insights.snippets.length >= 10, "overall review snippets should not be capped at eight");
   assert.strictEqual(result.scan_scope.mode, "brightdata-full-evidence");

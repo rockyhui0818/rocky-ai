@@ -1607,7 +1607,7 @@ function renderLinkScanEvidence() {
 }
 
 function renderScanEvidenceItem(scan) {
-  const images = Array.isArray(scan.image_candidates) ? scan.image_candidates.slice(0, 16) : [];
+  const images = Array.isArray(scan.image_candidates) ? scan.image_candidates.slice(0, 15) : [];
   const headings = Array.isArray(scan.headings) ? scan.headings.slice(0, 8) : [];
   const reviews = scan.review_insights || {};
   const scannerLabel = scan.scanner === "brightdata" ? "Bright Data 精简采集" : (scan.scanner === "local-browser" ? "本机浏览器采集" : "后端直接采集");

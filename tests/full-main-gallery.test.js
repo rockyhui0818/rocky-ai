@@ -35,11 +35,11 @@ async function run() {
     return new Response(`
       <html>
         <head>
-          <title>Full Main Gallery Product</title>
-          <meta name="description" content="All main gallery images must be collected.">
+          <title>Focused Main Gallery Product</title>
+          <meta name="description" content="Main gallery evidence should follow the common marketplace image count.">
         </head>
         <body>
-          <h1>Full Main Gallery Product</h1>
+          <h1>Focused Main Gallery Product</h1>
           <div id="landingImage" data-a-dynamic-image='${JSON.stringify(dynamicImages)}'></div>
         </body>
       </html>
@@ -58,13 +58,13 @@ async function run() {
 
   const mainImages = result.image_candidates.filter((image) => image.type === "main-image");
   assert.strictEqual(result.ok, true);
-  assert(mainImages.length >= 18, "all main-gallery images must be preserved in link scan evidence.");
-  assert(mainImages.some((image) => /主图图库第 18 张/.test(image.source_position || "")), "later main-gallery positions must be preserved.");
+  assert.strictEqual(mainImages.length, 8, "main-gallery evidence should keep the common 7-8 image set instead of flooding the model.");
+  assert(mainImages.some((image) => /主图图库第 8 张/.test(image.source_position || "")), "the common main-gallery positions must be preserved.");
   assert.strictEqual(result.scan_scope.main_image_count, mainImages.length);
 }
 
 run()
-  .then(() => console.log("full main gallery ok"))
+  .then(() => console.log("focused main gallery ok"))
   .catch((error) => {
     console.error(error);
     process.exit(1);

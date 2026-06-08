@@ -64,7 +64,7 @@ async function run() {
 
   const detailImages = result.image_candidates.filter((image) => image.type === "detail-page-image");
   assert.strictEqual(result.ok, true);
-  assert(detailImages.length >= 8, "A+ images after early placeholder markers must still be collected.");
+  assert.strictEqual(detailImages.length, 7, "A+ images after early placeholder markers should be reduced to the common 5-7 image set.");
   assert(detailImages.some((image) => image.source_marker === "aplus"), "late A+ images must retain the aplus source marker.");
 }
 
