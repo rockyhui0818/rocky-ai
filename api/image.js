@@ -4,7 +4,7 @@ const { filter, supabaseRequest } = require("./_lib/supabase");
 
 const MAX_REFERENCE_IMAGES = 6;
 const MAX_REFERENCE_BYTES = 1400000;
-const PROVIDER_TIMEOUT_MS = Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 55000);
+const PROVIDER_TIMEOUT_MS = Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 90000);
 const VERIFIED_IMAGE_BASE_URL = "http://154.64.230.35:3000/v1";
 const LEGACY_IMAGE_BASE_URL = "http://154.40.59.124:3000/v1";
 
@@ -113,6 +113,14 @@ function normalizeImageModel(model, baseUrl) {
   if (!candidate) return "gpt-image-2-pro";
   if (baseUrl === VERIFIED_IMAGE_BASE_URL && candidate === "gpt-image-2") return "gpt-image-2-pro";
   return candidate;
+}
+
+function publicProviderConfig(baseUrl, model) {
+  return {
+    host: providerHost(baseUrl),
+    model,
+    timeout_ms: PROVIDER_TIMEOUT_MS
+  };
 }
 
 async function fetchProvider(baseUrl, endpoint, options = {}) {
@@ -391,6 +399,7 @@ module.exports = async function handler(req, res) {
       model,
       size,
       mode: Array.from(modes).join(","),
+      provider: publicProviderConfig(baseUrl, model),
       images,
       failures,
       image: images[0] || {},
@@ -400,7 +409,8 @@ module.exports = async function handler(req, res) {
     return sendJson(res, error.statusCode || 500, {
       error: "IMAGE_GENERATION_FAILED",
       message: error.message,
-      details: error.details
+      details: error.details,
+      provider: publicProviderConfig(baseUrl, model)
     });
   }
 };

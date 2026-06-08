@@ -96,6 +96,9 @@ async function run() {
   }
 
   assert.strictEqual(normalizedRes.statusCode, 200);
+  const normalizedPayload = JSON.parse(normalizedRes.body);
+  assert.strictEqual(normalizedPayload.provider.host, "154.64.230.35:3000");
+  assert.strictEqual(normalizedPayload.provider.model, "gpt-image-2-pro");
   assert.strictEqual(requested[0].url, "http://154.64.230.35:3000/v1/images/generations");
   assert.strictEqual(requested[0].body.model, "gpt-image-2-pro");
 }
