@@ -1542,7 +1542,8 @@ function renderReviewInsightsPanel() {
         ["竞品弱点", insights.competitor_weaknesses],
         ["主图提示词修饰", insights.prompt_modifiers?.main_images || insights.how_to_use],
         ["详情页提示词修饰", insights.prompt_modifiers?.detail_pages],
-        ["不可覆盖约束", insights.prompt_modifiers?.negative_constraints]
+        ["不可覆盖约束", insights.prompt_modifiers?.negative_constraints],
+        ["Review 分析来源", insights.source_note]
       ]
     : [];
 
@@ -1632,7 +1633,7 @@ function renderScanEvidenceItem(scan) {
       ${scan.message ? `<p>${escapeHtml(scan.message)}</p>` : ""}
       ${scan.description ? `<p>${escapeHtml(scan.description)}</p>` : ""}
       ${reviewBits.length ? `<div class="scan-tags">${reviewBits.map((item) => `<em>${escapeHtml(item)}</em>`).join("")}</div>` : ""}
-      ${Array.isArray(reviews.snippets) && reviews.snippets.length ? `<p><b>Review 摘要：</b>${escapeHtml(reviews.snippets.slice(0, 2).join(" / "))}</p>` : ""}
+      ${Array.isArray(reviews.snippets) && reviews.snippets.length ? `<p><b>Review 摘要：</b>${escapeHtml(`${reviews.snippets.length} 条可见 review 摘要：${reviews.snippets.slice(0, 5).join(" / ")}`)}</p>` : ""}
       ${headings.length ? `<div class="scan-tags">${headings.map((item) => `<em>H${escapeHtml(item.level)} ${escapeHtml(item.text)}</em>`).join("")}</div>` : ""}
       ${images.length ? `
         <div class="scan-image-list">

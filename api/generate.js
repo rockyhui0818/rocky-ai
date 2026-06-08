@@ -165,6 +165,18 @@ function cleanText(value, maxLength = 1800) {
     .slice(0, maxLength);
 }
 
+function cleanReviewText(value, maxLength = 260) {
+  return cleanText(
+    decodeHtmlEntities(String(value || "")
+      .replace(/\\\//g, "/")
+      .replace(/\\u0026/g, "&")
+      .replace(/\\n|\\r|\\t/g, " ")
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'")),
+    maxLength
+  );
+}
+
 function extractMeta(html, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(`<meta[^>]+(?:name|property)=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i");
@@ -518,16 +530,33 @@ function extractReviewCount(html) {
 
 function extractReviewSnippets(html) {
   const snippets = [];
+  const addSnippet = (value) => {
+    if (snippets.length >= MAX_REVIEW_SNIPPETS) return;
+    const text = cleanReviewText(value, 260);
+    if (text.length >= 18 && !snippets.includes(text)) snippets.push(text);
+  };
+
   const patterns = [
-    /data-hook=["']review-body["'][^>]*>([\s\S]*?)<\/(?:span|div)>/gi,
-    /data-hook=["']review-title["'][^>]*>([\s\S]*?)<\/(?:span|a|div)>/gi,
-    /class=["'][^"']*(?:review|comentario|comment)[^"']*["'][^>]*>([\s\S]*?)<\/(?:p|span|div)>/gi
+    /data-hook=["']review-body["'][^>]*>([\s\S]{0,2200}?)(?=<\/(?:span|div)>\s*<\/(?:span|div)>|<\/(?:span|div)>)/gi,
+    /data-hook=["']review-title["'][^>]*>([\s\S]{0,1200}?)(?=<\/(?:span|a|div)>\s*<\/(?:span|a|div)>|<\/(?:span|a|div)>)/gi,
+    /class=["'][^"']*(?:review|comentario|comment)[^"']*["'][^>]*>([\s\S]{0,2200}?)(?=<\/(?:p|span|div)>\s*<\/(?:p|span|div)>|<\/(?:p|span|div)>)/gi
   ];
   for (const pattern of patterns) {
     let match;
     while ((match = pattern.exec(html)) && snippets.length < MAX_REVIEW_SNIPPETS) {
-      const text = cleanText(match[1], 260);
-      if (text.length >= 18 && !snippets.includes(text)) snippets.push(text);
+      addSnippet(match[1]);
+    }
+  }
+
+  const decoded = decodeHtmlEntities(html);
+  const serializedPatterns = [
+    /["'](?:reviewText|reviewBody|review_text|review_body)["']\s*:\s*["']((?:\\.|[^"'\\]){18,1200})["']/gi,
+    /(?:reviewText|reviewBody|review_text|review_body)\s*[:=]\s*["']((?:\\.|[^"'\\]){18,1200})["']/gi
+  ];
+  for (const pattern of serializedPatterns) {
+    let match;
+    while ((match = pattern.exec(decoded)) && snippets.length < MAX_REVIEW_SNIPPETS) {
+      addSnippet(match[1]);
     }
   }
 
@@ -535,7 +564,7 @@ function extractReviewSnippets(html) {
     const text = cleanText(html, 12000);
     const reviewLike = text
       .split(/(?<=[.!?。！？])\s+|\s{2,}/)
-      .map((item) => cleanText(item, 260))
+      .map((item) => cleanReviewText(item, 260))
       .filter((item) => /(quality|size|easy|durable|package|shipping|delivery|recommend|qualidade|tamanho|f[aá]cil|dur[aá]vel|embalagem|entrega|recomendo|bom|boa|ruim|excelente)/i.test(item));
     for (const item of reviewLike) {
       if (snippets.length >= MAX_REVIEW_SNIPPETS) break;
@@ -1675,11 +1704,17 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
 
   if (!imageUnits.length) {
     const promptSlotEvidence = buildPromptSlotEvidence(imageUnits, analyses, reviewModifierAnalysis);
+    const fallback = fallbackSegmentedResult(payload, analyses, analysisMeta, imageUnits, reviewModifierAnalysis, promptSlotEvidence);
     return {
-      result: fallbackSegmentedResult(payload, analyses, analysisMeta, imageUnits, reviewModifierAnalysis, promptSlotEvidence),
-      usage: {},
-      reasoning_effort: "skipped-no-links",
-      max_tokens: 0
+      result: {
+        ...fallback,
+        review_modifier_analysis: reviewModifierAnalysis,
+        review_modifier_meta: reviewModifierMeta,
+        review_insights: reviewModifierAnalysis
+      },
+      usage: sumUsage([reviewModifierMeta.usage]),
+      reasoning_effort: reviewModifierMeta.reasoning_effort,
+      max_tokens: reviewModifierMeta.max_tokens
     };
   }
 
@@ -1952,3 +1987,8 @@ module.exports = async function handler(req, res) {
 module.exports.runGenerateWorkflow = runGenerateWorkflow;
 module.exports.scanProductLink = scanProductLink;
 module.exports.scanProductLinks = scanProductLinks;
+if (process.env.NODE_ENV === "test") {
+  module.exports.__test = {
+    extractReviewInsights
+  };
+}
