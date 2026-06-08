@@ -6,9 +6,9 @@ const MODEL_TIMEOUT_MS = 240000;
 const DIRECT_LINK_SCAN_TIMEOUT_MS = 6000;
 const BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = 90000;
 const MAX_SCAN_LINKS = 6;
-const MAX_IMAGE_CANDIDATES = 36;
-const MAX_MAIN_IMAGE_CANDIDATES = 12;
-const MAX_DETAIL_IMAGE_CANDIDATES = 18;
+const MAX_IMAGE_CANDIDATES = 72;
+const MAX_MAIN_IMAGE_CANDIDATES = 30;
+const MAX_DETAIL_IMAGE_CANDIDATES = 30;
 const MAX_HEADINGS = 10;
 const MAX_REVIEW_SNIPPETS = 30;
 const PAGE_TEXT_SAMPLE_LENGTH = 4000;
@@ -372,11 +372,11 @@ function extractImageCandidates(html, baseUrl) {
   };
   for (const block of dynamicImageBlocks.slice(0, 12)) {
     const urls = extractDynamicImageUrls(block[2]);
-    for (const src of urls.slice(0, 8)) {
+    for (const src of urls.slice(0, MAX_MAIN_IMAGE_CANDIDATES)) {
       addMainGalleryImage(src, "data-a-dynamic-image", "high");
     }
   }
-  for (const src of extractAmazonCarouselGalleryUrls(html).slice(0, 16)) {
+  for (const src of extractAmazonCarouselGalleryUrls(html).slice(0, MAX_MAIN_IMAGE_CANDIDATES)) {
     const cleanSrc = cleanImageUrl(src);
     if (!cleanSrc || candidates.some((item) => cleanImageUrl(item.src) === cleanSrc)) continue;
     addMainGalleryImage(cleanSrc, "colorImages.initial", "high");
@@ -399,7 +399,7 @@ function extractImageCandidates(html, baseUrl) {
   for (const { marker, section } of detailSections) {
     const sectionImages = extractImageUrlsFromHtml(section)
       .map((src) => cleanImageUrl(src))
-      .filter((src) => src && !isNonProductImage(src) && isLikelyDetailImage(src));
+      .filter((src) => src && !isNonProductImage(src) && isLikelyDetailImage(src) && !isLowQualityDetailVariant(src));
     let addedFromSection = 0;
     for (const src of sectionImages) {
       if (detailSeen.has(src)) continue;
@@ -424,30 +424,6 @@ function extractImageCandidates(html, baseUrl) {
       ));
       if (addedFromSection >= 24) break;
     }
-  }
-
-  const knownMainSources = new Set(candidates.filter((item) => item.type === "main-image").map((item) => cleanImageUrl(item.src)));
-  for (const src of extractImageUrlsFromHtml(html).slice(0, 80)) {
-    const cleanSrc = cleanImageUrl(src);
-    if (!cleanSrc || isNonProductImage(cleanSrc) || knownMainSources.has(cleanSrc)) continue;
-    if (!/m\.media-amazon\.com\/images\/I\//i.test(cleanSrc) && detailIndex >= 1) continue;
-    detailIndex += 1;
-    const baseCandidate = {
-      type: "detail-page-image",
-      src: absolutizeUrl(cleanSrc, baseUrl),
-      alt: "Product page supporting/detail image",
-      score: cleanSrc.includes("m.media-amazon.com/images/I/") ? 8 : 5
-    };
-    candidates.push(enrichImageCandidate(
-      baseCandidate,
-      {
-        area: "detail",
-        index: detailIndex,
-        role: classifyImageCandidate(baseCandidate),
-        sourceMarker: "full-page-media",
-        confidence: "low"
-      }
-    ));
   }
 
   const unique = new Map();
@@ -508,6 +484,11 @@ function isLikelyDetailImage(src = "") {
     value.includes("media-library") ||
     value.includes("thumbnail_")
   );
+}
+
+function isLowQualityDetailVariant(src = "") {
+  const value = String(src || "");
+  return /_(?:AC_)?(?:US\d{2,3}|SS\d{2,3}|SY\d{2,3}|SX\d{2,3})(?:_|\\.)/i.test(value) && !/S(?:L|X)1[0-9]{3}/i.test(value);
 }
 
 function extractHeadings(html) {

@@ -7,14 +7,6 @@ function clearApiModule(relativePath) {
   delete require.cache[require.resolve(path.join(root, relativePath))];
 }
 
-function mainImage(index) {
-  return `https://m.media-amazon.com/images/I/large-gallery-${index}._AC_SL1500_.jpg`;
-}
-
-function detailImage(index) {
-  return `https://m.media-amazon.com/images/S/aplus-media-library-service-media/detail-survive-${index}.__CR0,0,1464,600_PT0_SX1464_V1___.png`;
-}
-
 async function run() {
   const previousEnv = {
     NODE_ENV: process.env.NODE_ENV,
@@ -29,30 +21,23 @@ async function run() {
   process.env.BRIGHTDATA_ZONE = "web_unlocker1";
   process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "200";
 
-  const dynamicImageBlocks = Array.from({ length: 6 }, (_, blockIndex) => {
-    const dynamicImages = {};
-    for (let index = 1; index <= 8; index += 1) {
-      dynamicImages[mainImage(blockIndex * 8 + index)] = [1500, 1500];
-    }
-    return `<div data-a-dynamic-image='${JSON.stringify(dynamicImages)}'></div>`;
-  }).join("\n");
-  const detailImages = Array.from({ length: 10 }, (_, index) =>
-    `<img src="${detailImage(index + 1)}" alt="A+ detail module ${index + 1}">`
-  ).join("\n");
-
   global.fetch = async (url) => {
     assert.strictEqual(String(url), "https://api.brightdata.com/request");
     return new Response(`
       <html>
         <head>
-          <title>Large Gallery With A+</title>
-          <meta name="description" content="Large gallery must not hide A+ evidence.">
+          <title>Pollution Product</title>
+          <meta name="description" content="Only gallery images should be collected.">
         </head>
         <body>
-          <h1>Large Gallery With A+</h1>
-          <div id="landingImage">${dynamicImageBlocks}</div>
-          <div id="aplus" class="aplus-v2 premium-aplus">
-            ${detailImages}
+          <h1>Pollution Product</h1>
+          <div id="landingImage" data-a-dynamic-image='{"https://m.media-amazon.com/images/I/main-1._AC_SL1500_.jpg":[1500,1500],"https://m.media-amazon.com/images/I/main-2._AC_SL1500_.jpg":[1500,1500]}'></div>
+          <div id="sp_detail">
+            <img src="https://m.media-amazon.com/images/I/sponsored-other-product._AC_SL1500_.jpg" alt="Sponsored other product">
+            <img src="https://m.media-amazon.com/images/I/recommended-other-product._AC_SL1500_.jpg" alt="Customers also bought">
+          </div>
+          <div id="reviews">
+            <img src="https://m.media-amazon.com/images/I/review-customer-photo._AC_SL1500_.jpg" alt="Customer review image">
           </div>
         </body>
       </html>
@@ -70,15 +55,15 @@ async function run() {
   }
 
   const mainImages = result.image_candidates.filter((image) => image.type === "main-image");
-  const detailImagesResult = result.image_candidates.filter((image) => image.type === "detail-page-image");
+  const detailImages = result.image_candidates.filter((image) => image.type === "detail-page-image");
   assert.strictEqual(result.ok, true);
-  assert(mainImages.length >= 30, "large main gallery evidence should be preserved beyond twelve images.");
-  assert(detailImagesResult.length >= 10, "detail/A+ images must survive even when the main gallery is large.");
-  assert.strictEqual(result.scan_scope.detail_page_image_count, detailImagesResult.length);
+  assert.strictEqual(mainImages.length, 2);
+  assert.strictEqual(detailImages.length, 0, "images outside product gallery and A+/detail modules must not be collected as detail-page images.");
+  assert(result.image_candidates.every((image) => !/sponsored|recommended|review-customer/i.test(image.src)), "unrelated page images must not be present in scan evidence.");
 }
 
 run()
-  .then(() => console.log("detail images survive large gallery ok"))
+  .then(() => console.log("no full page image pollution ok"))
   .catch((error) => {
     console.error(error);
     process.exit(1);

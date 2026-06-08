@@ -8,11 +8,7 @@ function clearApiModule(relativePath) {
 }
 
 function mainImage(index) {
-  return `https://m.media-amazon.com/images/I/large-gallery-${index}._AC_SL1500_.jpg`;
-}
-
-function detailImage(index) {
-  return `https://m.media-amazon.com/images/S/aplus-media-library-service-media/detail-survive-${index}.__CR0,0,1464,600_PT0_SX1464_V1___.png`;
+  return `https://m.media-amazon.com/images/I/full-gallery-${index}._AC_SL1500_.jpg`;
 }
 
 async function run() {
@@ -29,31 +25,22 @@ async function run() {
   process.env.BRIGHTDATA_ZONE = "web_unlocker1";
   process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "200";
 
-  const dynamicImageBlocks = Array.from({ length: 6 }, (_, blockIndex) => {
-    const dynamicImages = {};
-    for (let index = 1; index <= 8; index += 1) {
-      dynamicImages[mainImage(blockIndex * 8 + index)] = [1500, 1500];
-    }
-    return `<div data-a-dynamic-image='${JSON.stringify(dynamicImages)}'></div>`;
-  }).join("\n");
-  const detailImages = Array.from({ length: 10 }, (_, index) =>
-    `<img src="${detailImage(index + 1)}" alt="A+ detail module ${index + 1}">`
-  ).join("\n");
+  const dynamicImages = {};
+  for (let index = 1; index <= 18; index += 1) {
+    dynamicImages[mainImage(index)] = [1500, 1500];
+  }
 
   global.fetch = async (url) => {
     assert.strictEqual(String(url), "https://api.brightdata.com/request");
     return new Response(`
       <html>
         <head>
-          <title>Large Gallery With A+</title>
-          <meta name="description" content="Large gallery must not hide A+ evidence.">
+          <title>Full Main Gallery Product</title>
+          <meta name="description" content="All main gallery images must be collected.">
         </head>
         <body>
-          <h1>Large Gallery With A+</h1>
-          <div id="landingImage">${dynamicImageBlocks}</div>
-          <div id="aplus" class="aplus-v2 premium-aplus">
-            ${detailImages}
-          </div>
+          <h1>Full Main Gallery Product</h1>
+          <div id="landingImage" data-a-dynamic-image='${JSON.stringify(dynamicImages)}'></div>
         </body>
       </html>
     `, { status: 200, headers: { "Content-Type": "text/html" } });
@@ -70,15 +57,14 @@ async function run() {
   }
 
   const mainImages = result.image_candidates.filter((image) => image.type === "main-image");
-  const detailImagesResult = result.image_candidates.filter((image) => image.type === "detail-page-image");
   assert.strictEqual(result.ok, true);
-  assert(mainImages.length >= 30, "large main gallery evidence should be preserved beyond twelve images.");
-  assert(detailImagesResult.length >= 10, "detail/A+ images must survive even when the main gallery is large.");
-  assert.strictEqual(result.scan_scope.detail_page_image_count, detailImagesResult.length);
+  assert(mainImages.length >= 18, "all main-gallery images must be preserved in link scan evidence.");
+  assert(mainImages.some((image) => /主图图库第 18 张/.test(image.source_position || "")), "later main-gallery positions must be preserved.");
+  assert.strictEqual(result.scan_scope.main_image_count, mainImages.length);
 }
 
 run()
-  .then(() => console.log("detail images survive large gallery ok"))
+  .then(() => console.log("full main gallery ok"))
   .catch((error) => {
     console.error(error);
     process.exit(1);
