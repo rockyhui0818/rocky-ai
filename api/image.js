@@ -5,6 +5,8 @@ const { filter, supabaseRequest } = require("./_lib/supabase");
 const MAX_REFERENCE_IMAGES = 6;
 const MAX_REFERENCE_BYTES = 1400000;
 const PROVIDER_TIMEOUT_MS = Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 55000);
+const VERIFIED_IMAGE_BASE_URL = "http://154.64.230.35:3000/v1";
+const LEGACY_IMAGE_BASE_URL = "http://154.40.59.124:3000/v1";
 
 function firstImage(data) {
   const item = data?.data?.[0] || {};
@@ -99,6 +101,18 @@ function providerHost(baseUrl) {
   } catch {
     return "invalid-provider-url";
   }
+}
+
+function normalizeImageBaseUrl(value) {
+  const baseUrl = String(value || VERIFIED_IMAGE_BASE_URL).replace(/\/$/, "");
+  return baseUrl === LEGACY_IMAGE_BASE_URL ? VERIFIED_IMAGE_BASE_URL : baseUrl;
+}
+
+function normalizeImageModel(model, baseUrl) {
+  const candidate = String(model || "").trim();
+  if (!candidate) return "gpt-image-2-pro";
+  if (baseUrl === VERIFIED_IMAGE_BASE_URL && candidate === "gpt-image-2") return "gpt-image-2-pro";
+  return candidate;
 }
 
 async function fetchProvider(baseUrl, endpoint, options = {}) {
@@ -236,8 +250,8 @@ module.exports = async function handler(req, res) {
   }
 
   const apiKey = process.env.OPENAI_IMAGE_API_KEY || process.env.OPENAI_API_KEY;
-  const baseUrl = (process.env.OPENAI_IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || "http://154.40.59.124:3000/v1").replace(/\/$/, "");
-  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
+  const baseUrl = normalizeImageBaseUrl(process.env.OPENAI_IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || VERIFIED_IMAGE_BASE_URL);
+  const model = normalizeImageModel(process.env.OPENAI_IMAGE_MODEL, baseUrl);
 
   if (!apiKey) {
     return sendJson(res, 500, {

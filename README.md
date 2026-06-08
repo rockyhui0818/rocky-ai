@@ -37,17 +37,20 @@ node local-browser-scanner.js
 不要把真实 API Key 写进 `app.js`、`index.html` 或提交到 GitHub。部署到 Vercel 时，在 Project Settings -> Environment Variables 添加：
 
 - `OPENAI_API_KEY`: 你的模型 API Key
-- `OPENAI_BASE_URL`: OpenAI 兼容接口地址，默认 `https://api.openai.com/v1`
+- `OPENAI_BASE_URL`: OpenAI 兼容接口地址，默认 `http://154.40.59.124:3000/v1`
 - `OPENAI_TEXT_MODEL`: 文本生成模型，默认 `gpt-5.5`
 - `OPENAI_REASONING_EFFORT`: 文本模型推理强度，默认 `high`；如果第三方兼容接口不支持该参数，后端会自动降级重试
 - `OPENAI_MAX_COMPLETION_TOKENS`: 链接分析最大输出长度，默认 `1800`，用于加快返回速度
+- `OPENAI_IMAGE_API_KEY`: 图片生成专用 API Key；不填时才回退使用 `OPENAI_API_KEY`
+- `OPENAI_IMAGE_BASE_URL`: 图片生成专用 OpenAI 兼容接口地址，当前可用地址为 `http://154.64.230.35:3000/v1`；不填时才回退使用 `OPENAI_BASE_URL`
+- `OPENAI_IMAGE_MODEL`: 图片生成模型，当前可用模型为 `gpt-image-2-pro`
 - `BRIGHTDATA_API_KEY`: Bright Data Web Unlocker API Key，用于优先解锁 Amazon/TikTok 等会拦截服务器抓取的平台
 - `BRIGHTDATA_ZONE`: Bright Data zone 名称，默认 `web_unlocker1`
 - `SUPABASE_URL`: Supabase Project URL
 - `SUPABASE_SERVICE_ROLE_KEY`: Supabase service_role key，仅放后端环境变量，不能暴露到前端
 - `SESSION_SECRET`: 任意长随机字符串，用于签发登录 token
 
-如果你使用的是第三方 OpenAI 兼容端口，只需要把 `OPENAI_BASE_URL` 改成你的 API Base URL，例如 `https://api.example.com/v1`。
+如果你使用的是第三方 OpenAI 兼容端口，文本分析只需要把 `OPENAI_BASE_URL` 改成你的 API Base URL，例如 `http://154.40.59.124:3000/v1`。如果图片生成走另一家供应商，请单独配置 `OPENAI_IMAGE_BASE_URL` 和 `OPENAI_IMAGE_API_KEY`，避免文本分析 API 覆盖生图 API。
 
 前端发送给 `/api/generate` 的内容包括：账号信息、平台、产品链接、关键词、卖点、图片文件元信息、图片提示词和详情页提示词。后端会返回结构化 JSON，并把真实 `usage.total_tokens` 记录到 Dashboard。
 
