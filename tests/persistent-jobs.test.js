@@ -44,6 +44,12 @@ assert(
 );
 
 assert(
+  /on conflict \(username\) do update set/i.test(schema) &&
+    /password_hash = excluded\.password_hash/i.test(schema),
+  "Supabase schema must repair default account password hashes when rerun."
+);
+
+assert(
   jobsSource.includes("supabaseRequest(\"generate_jobs\"") ||
     jobsSource.includes("supabaseRequest(`generate_jobs"),
   "Job helper must write/read generate_jobs through Supabase."

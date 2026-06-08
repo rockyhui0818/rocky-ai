@@ -91,4 +91,11 @@ values
     '["amazon","all"]'::jsonb,
     '["openai","manual"]'::jsonb
   )
-on conflict (username) do nothing;
+on conflict (username) do update set
+  password_hash = excluded.password_hash,
+  name = excluded.name,
+  role = excluded.role,
+  status = excluded.status,
+  quota = excluded.quota,
+  platforms = excluded.platforms,
+  models = excluded.models;
