@@ -541,8 +541,23 @@ async function fetchProductHtml(url, signal) {
           scanner: "brightdata"
         };
       }
-    } catch {
-      // Fall through to direct fetch when Web Unlocker is unavailable.
+      const error = new Error(`Bright Data request failed with status ${response.status}.`);
+      error.code = "BRIGHTDATA_SCAN_FAILED";
+      error.statusCode = response.status;
+      error.scanner = "brightdata";
+      throw error;
+    } catch (error) {
+      if (error.name === "AbortError") {
+        const timeoutError = new Error("Bright Data 扫描超时，未读取原始商品链接以避免 Amazon 风控页污染结果。");
+        timeoutError.code = "BRIGHTDATA_SCAN_TIMEOUT";
+        timeoutError.scanner = "brightdata";
+        throw timeoutError;
+      }
+      if (!error.code) {
+        error.code = "BRIGHTDATA_SCAN_FAILED";
+      }
+      error.scanner = "brightdata";
+      throw error;
     } finally {
       clearTimeout(brightDataTimeout);
       signal?.removeEventListener?.("abort", relayAbort);
@@ -567,7 +582,7 @@ async function scanProductLink(url, marketHint) {
   const controller = new AbortController();
   const brightDataTimeoutMs = Number(process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS || BRIGHTDATA_LINK_SCAN_TIMEOUT_MS);
   const scanTimeoutMs = process.env.BRIGHTDATA_API_KEY
-    ? brightDataTimeoutMs + DIRECT_LINK_SCAN_TIMEOUT_MS + 2000
+    ? brightDataTimeoutMs + 2000
     : DIRECT_LINK_SCAN_TIMEOUT_MS;
   const timeout = setTimeout(() => controller.abort(), scanTimeoutMs);
   try {
@@ -613,8 +628,10 @@ async function scanProductLink(url, marketHint) {
       url,
       market_hint: marketHint,
       ok: false,
-      error: error.name === "AbortError" ? "LINK_SCAN_TIMEOUT" : "LINK_SCAN_FAILED",
-      message: error.message
+      scanner: error.scanner || undefined,
+      error: error.code || (error.name === "AbortError" ? "LINK_SCAN_TIMEOUT" : "LINK_SCAN_FAILED"),
+      message: error.message,
+      scan_scope: error.scanner === "brightdata" ? brightDataScanScope() : undefined
     };
   } finally {
     clearTimeout(timeout);

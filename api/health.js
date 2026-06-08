@@ -40,6 +40,7 @@ module.exports = async function handler(req, res) {
       },
       link_scanner: {
         brightdata_configured: configured(process.env.BRIGHTDATA_API_KEY),
+        mode: configured(process.env.BRIGHTDATA_API_KEY) ? "brightdata-required" : "direct-fetch",
         brightdata_zone: process.env.BRIGHTDATA_ZONE || "web_unlocker1",
         brightdata_timeout_ms: Number(process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS || 20000)
       }

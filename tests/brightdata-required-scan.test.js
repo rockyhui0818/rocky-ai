@@ -20,30 +20,13 @@ async function run() {
   process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "20";
 
   const calls = [];
-  global.fetch = async (url, options = {}) => {
+  global.fetch = async (url) => {
     calls.push(String(url));
     if (String(url).includes("brightdata.com")) {
       await new Promise((resolve) => setTimeout(resolve, 60));
-      return new Response("", { status: 504 });
+      throw new DOMException("The operation was aborted.", "AbortError");
     }
-    return new Response(`
-      <html>
-        <head>
-          <title>Fallback Product</title>
-          <meta name="description" content="Direct fetch product description">
-        </head>
-        <body>
-          <h1>Fallback Product</h1>
-          <img src="/main.jpg" alt="product main image">
-          <span itemprop="ratingValue" content="4.7"></span>
-          <span itemprop="reviewCount" content="123"></span>
-          <span data-hook="review-body">Muito bom e resistente.</span>
-        </body>
-      </html>
-    `, {
-      status: 200,
-      headers: { "Content-Type": "text/html" }
-    });
+    throw new Error("Direct fetch must not run when Bright Data is configured.");
   };
 
   clearApiModule("api/generate.js");
@@ -57,16 +40,15 @@ async function run() {
     else process.env[key] = value;
   }
 
-  assert(calls.some((url) => url.includes("brightdata.com")), "Bright Data should be attempted first.");
-  assert(calls.includes("https://example.com/product"), "Direct fetch fallback should run after Bright Data timeout.");
-  assert.strictEqual(result.ok, true);
-  assert.strictEqual(result.scanner, "direct-fetch");
-  assert.strictEqual(result.title, "Fallback Product");
-  assert.strictEqual(result.review_insights.review_count, 123);
+  assert.deepStrictEqual(calls, ["https://api.brightdata.com/request"]);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.scanner, "brightdata");
+  assert.strictEqual(result.error, "BRIGHTDATA_SCAN_TIMEOUT");
+  assert.match(result.message, /Bright Data/i);
 }
 
 run()
-  .then(() => console.log("link scan fallback ok"))
+  .then(() => console.log("brightdata required scan ok"))
   .catch((error) => {
     console.error(error);
     process.exit(1);
