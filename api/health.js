@@ -12,6 +12,10 @@ function safeHost(value) {
   }
 }
 
+function brightDataTimeoutMs() {
+  return Math.max(Number(process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS || 60000) || 0, 60000);
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "HEAD") {
     res.setHeader("Allow", "GET, HEAD");
@@ -43,7 +47,7 @@ module.exports = async function handler(req, res) {
         brightdata_configured: configured(process.env.BRIGHTDATA_API_KEY),
         mode: configured(process.env.BRIGHTDATA_API_KEY) ? "brightdata-required" : "direct-fetch",
         brightdata_zone: process.env.BRIGHTDATA_ZONE || "web_unlocker1",
-        brightdata_timeout_ms: Number(process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS || 20000)
+        brightdata_timeout_ms: brightDataTimeoutMs()
       }
     },
     time: new Date().toISOString()

@@ -1607,14 +1607,16 @@ function renderLinkScanEvidence() {
 }
 
 function renderScanEvidenceItem(scan) {
-  const images = Array.isArray(scan.image_candidates) ? scan.image_candidates.slice(0, 6) : [];
+  const images = Array.isArray(scan.image_candidates) ? scan.image_candidates.slice(0, 16) : [];
   const headings = Array.isArray(scan.headings) ? scan.headings.slice(0, 8) : [];
   const reviews = scan.review_insights || {};
   const scannerLabel = scan.scanner === "brightdata" ? "Bright Data 精简采集" : (scan.scanner === "local-browser" ? "本机浏览器采集" : "后端直接采集");
   const scanStatus = scan.ok ? `扫描成功 · ${scannerLabel}` : (scan.error === "LINK_SCAN_BLOCKED" ? "平台风控拦截，未读到真实商品页" : escapeHtml(scan.error || "扫描失败"));
   const scope = scan.scan_scope || {};
-  const scopeText = scope.mode === "brightdata-useful-only"
-    ? `只采集主图 ${scope.main_image_count || 0} 张、详情页图片 ${scope.detail_page_image_count || 0} 张、Review 信息；已屏蔽导航/广告/菜单/页脚/整页正文。`
+  const scopeText = scope.mode === "brightdata-full-evidence"
+    ? `完整采集标题、描述、主图 ${scope.main_image_count || 0} 张、详情页图片 ${scope.detail_page_image_count || 0} 张、页面正文样本和 Review 信息；已屏蔽导航/广告/菜单/页脚等无关内容。`
+    : scope.mode === "brightdata-useful-only"
+      ? `只采集主图 ${scope.main_image_count || 0} 张、详情页图片 ${scope.detail_page_image_count || 0} 张、Review 信息；已屏蔽导航/广告/菜单/页脚/整页正文。`
     : "";
   const reviewBits = [
     reviews.rating ? `评分 ${reviews.rating}` : "",

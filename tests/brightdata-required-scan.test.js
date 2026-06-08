@@ -9,12 +9,14 @@ function clearApiModule(relativePath) {
 
 async function run() {
   const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
     BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY,
     BRIGHTDATA_ZONE: process.env.BRIGHTDATA_ZONE,
     BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS
   };
   const previousFetch = global.fetch;
 
+  process.env.NODE_ENV = "test";
   process.env.BRIGHTDATA_API_KEY = "brd-test";
   process.env.BRIGHTDATA_ZONE = "web_unlocker1";
   process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "20";
@@ -49,12 +51,14 @@ async function run() {
 
 async function ignoresProvidedLocalScanResultsWhenBrightDataIsConfigured() {
   const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
     BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY,
     BRIGHTDATA_ZONE: process.env.BRIGHTDATA_ZONE,
     BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS
   };
   const previousFetch = global.fetch;
 
+  process.env.NODE_ENV = "test";
   process.env.BRIGHTDATA_API_KEY = "brd-test";
   process.env.BRIGHTDATA_ZONE = "web_unlocker1";
   process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "200";

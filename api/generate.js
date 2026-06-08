@@ -4,14 +4,14 @@ const { filter, supabaseRequest } = require("./_lib/supabase");
 
 const MODEL_TIMEOUT_MS = 240000;
 const DIRECT_LINK_SCAN_TIMEOUT_MS = 6000;
-const BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = 20000;
+const BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = 60000;
 const MAX_SCAN_LINKS = 6;
-const MAX_IMAGE_CANDIDATES = 14;
-const MAX_MAIN_IMAGE_CANDIDATES = 6;
-const MAX_DETAIL_IMAGE_CANDIDATES = 8;
+const MAX_IMAGE_CANDIDATES = 36;
+const MAX_MAIN_IMAGE_CANDIDATES = 12;
+const MAX_DETAIL_IMAGE_CANDIDATES = 18;
 const MAX_HEADINGS = 10;
-const MAX_REVIEW_SNIPPETS = 8;
-const PAGE_TEXT_SAMPLE_LENGTH = 900;
+const MAX_REVIEW_SNIPPETS = 30;
+const PAGE_TEXT_SAMPLE_LENGTH = 4000;
 const DEFAULT_MAX_COMPLETION_TOKENS = 900;
 const DEFAULT_SYNTHESIS_MAX_TOKENS = 4200;
 const STEP_IMAGE_LIMIT = 1;
@@ -21,6 +21,7 @@ const IMAGE_ANALYSIS_BUDGET_MS = 220000;
 const REVIEW_ANALYSIS_BUDGET_TOKENS = 900;
 const BRIGHTDATA_API_URL = "https://api.brightdata.com/request";
 const USEFUL_IMAGE_TYPES = new Set(["main-image", "detail-page-image"]);
+const MIN_PRODUCTION_BRIGHTDATA_TIMEOUT_MS = 60000;
 const LISTING_IMAGE_TYPES = [
   "white_main",
   "lifestyle",
@@ -201,17 +202,33 @@ function cleanImageUrl(src = "") {
     .trim();
 }
 
+function extractDynamicImageUrls(value = "") {
+  const source = decodeHtmlEntities(value).replace(/\\\//g, "/").replace(/\\u0026/g, "&").trim();
+  const urls = [];
+  try {
+    const parsed = JSON.parse(source);
+    for (const key of Object.keys(parsed || {})) {
+      const clean = cleanImageUrl(key);
+      if (clean) urls.push(clean);
+    }
+  } catch {
+    // Amazon's dynamic image block is normally JSON; regex is a fallback for partial/escaped captures.
+  }
+  const found = Array.from(source.matchAll(/https?:\/\/[^\s"'<>\\{}[\]]+?\.(?:jpg|jpeg|png|webp)(?:[^\s"'<>\\{}[\]]*)?/gi)).map((item) => cleanImageUrl(item[0]));
+  return [...urls, ...found].filter(Boolean);
+}
+
 function extractImageUrlsFromHtml(fragment = "") {
   const urls = [];
   const patterns = [
-    /data-a-dynamic-image=["']([^"']+)["']/gi,
-    /\b(?:src|data-src|data-old-hires)=["']([^"']+)["']/gi
+    /data-a-dynamic-image=(["'])([\s\S]*?)\1/gi,
+    /\b(?:src|data-src|data-old-hires)=(["'])([\s\S]*?)\1/gi
   ];
   for (const pattern of patterns) {
     let match;
     while ((match = pattern.exec(fragment))) {
-      const source = decodeHtmlEntities(match[1] || "").replace(/\\\//g, "/").replace(/\\u0026/g, "&");
-      const found = Array.from(source.matchAll(/https?:\/\/[^\s"'<>\\]+?\.(?:jpg|jpeg|png|webp)/gi)).map((item) => cleanImageUrl(item[0]));
+      const source = decodeHtmlEntities(match[2] || "").replace(/\\\//g, "/").replace(/\\u0026/g, "&");
+      const found = extractDynamicImageUrls(source);
       if (found.length) urls.push(...found);
       if (/^https?:\/\//i.test(source)) urls.push(source);
     }
@@ -263,11 +280,10 @@ function extractImageCandidates(html, baseUrl) {
     ));
   }
 
-  const dynamicImageBlocks = Array.from(html.matchAll(/data-a-dynamic-image=["']([^"']+)["']/gi));
+  const dynamicImageBlocks = Array.from(html.matchAll(/data-a-dynamic-image=(["'])([\s\S]*?)\1/gi));
   let galleryIndex = 0;
   for (const block of dynamicImageBlocks.slice(0, 12)) {
-    const decodedBlock = decodeHtmlEntities(block[1]).replace(/\\\//g, "/").replace(/\\u0026/g, "&");
-    const urls = Array.from(decodedBlock.matchAll(/https?:\/\/[^\s"'<>\\]+?\.(?:jpg|jpeg|png|webp)/gi)).map((match) => cleanImageUrl(match[0]));
+    const urls = extractDynamicImageUrls(block[2]);
     for (const src of urls.slice(0, 8)) {
       if (!src || isNonProductImage(src)) continue;
       galleryIndex += 1;
@@ -318,6 +334,30 @@ function extractImageCandidates(html, baseUrl) {
         }
       ));
     }
+  }
+
+  const knownMainSources = new Set(candidates.filter((item) => item.type === "main-image").map((item) => cleanImageUrl(item.src)));
+  for (const src of extractImageUrlsFromHtml(html).slice(0, 80)) {
+    const cleanSrc = cleanImageUrl(src);
+    if (!cleanSrc || isNonProductImage(cleanSrc) || knownMainSources.has(cleanSrc)) continue;
+    if (!/m\.media-amazon\.com\/images\/I\//i.test(cleanSrc) && detailIndex >= 1) continue;
+    detailIndex += 1;
+    const baseCandidate = {
+      type: "detail-page-image",
+      src: absolutizeUrl(cleanSrc, baseUrl),
+      alt: "Product page supporting/detail image",
+      score: cleanSrc.includes("m.media-amazon.com/images/I/") ? 8 : 5
+    };
+    candidates.push(enrichImageCandidate(
+      baseCandidate,
+      {
+        area: "detail",
+        index: detailIndex,
+        role: classifyImageCandidate(baseCandidate),
+        sourceMarker: "full-page-media",
+        confidence: "low"
+      }
+    ));
   }
 
   const unique = new Map();
@@ -465,19 +505,19 @@ function cleanBrightDataScanResult(scan) {
     ...scan,
     image_candidates: [...mainImages, ...detailImages],
     headings: usefulHeadings,
-    page_text_sample: "",
-    description: cleanText(scan.description, 220),
+    page_text_sample: cleanText(scan.page_text_sample, PAGE_TEXT_SAMPLE_LENGTH),
+    description: cleanText(scan.description, 700),
     scan_scope: brightDataScanScope(mainImages.length, detailImages.length)
   };
 }
 
 function brightDataScanScope(mainImageCount = 0, detailImageCount = 0) {
   return {
-    mode: "brightdata-useful-only",
-    collected: ["main_images", "detail_page_images", "review_insights"],
+    mode: "brightdata-full-evidence",
+    collected: ["title", "description", "main_images", "detail_page_images", "review_insights", "page_text_sample"],
     main_image_count: mainImageCount,
     detail_page_image_count: detailImageCount,
-    ignored: ["navigation", "ads", "menus", "footer", "full_page_text", "unrelated_images"]
+    ignored: ["navigation", "ads", "menus", "footer", "unrelated_images"]
   };
 }
 
@@ -506,6 +546,12 @@ function isBotProtectionPage(html, finalUrl = "") {
   );
 }
 
+function brightDataTimeoutMs() {
+  const configuredMs = Number(process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS || BRIGHTDATA_LINK_SCAN_TIMEOUT_MS);
+  if (process.env.NODE_ENV === "test") return configuredMs;
+  return Math.max(configuredMs || 0, MIN_PRODUCTION_BRIGHTDATA_TIMEOUT_MS);
+}
+
 async function fetchProductHtml(url, signal) {
   const brightDataKey = process.env.BRIGHTDATA_API_KEY;
   const brightDataZone = process.env.BRIGHTDATA_ZONE || "web_unlocker1";
@@ -513,8 +559,7 @@ async function fetchProductHtml(url, signal) {
     const brightDataController = new AbortController();
     const relayAbort = () => brightDataController.abort();
     signal?.addEventListener?.("abort", relayAbort, { once: true });
-    const brightDataTimeoutMs = Number(process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS || BRIGHTDATA_LINK_SCAN_TIMEOUT_MS);
-    const brightDataTimeout = setTimeout(() => brightDataController.abort(), brightDataTimeoutMs);
+    const brightDataTimeout = setTimeout(() => brightDataController.abort(), brightDataTimeoutMs());
     try {
       const response = await fetch(BRIGHTDATA_API_URL, {
         method: "POST",
@@ -580,9 +625,8 @@ async function fetchProductHtml(url, signal) {
 
 async function scanProductLink(url, marketHint) {
   const controller = new AbortController();
-  const brightDataTimeoutMs = Number(process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS || BRIGHTDATA_LINK_SCAN_TIMEOUT_MS);
   const scanTimeoutMs = process.env.BRIGHTDATA_API_KEY
-    ? brightDataTimeoutMs + 2000
+    ? brightDataTimeoutMs() + 2000
     : DIRECT_LINK_SCAN_TIMEOUT_MS;
   const timeout = setTimeout(() => controller.abort(), scanTimeoutMs);
   try {
@@ -789,9 +833,9 @@ function imageEvidenceFor(scans = [], mode) {
     description: scan.description,
     images: (scan.image_candidates || [])
       .filter((image) => mode === "detail" ? /detail|a-plus|aplus|module|lifestyle|hero/i.test(`${image.type} ${image.src} ${image.alt}`) : true)
-      .slice(0, mode === "detail" ? 6 : 4),
+      .slice(0, mode === "detail" ? MAX_DETAIL_IMAGE_CANDIDATES : MAX_MAIN_IMAGE_CANDIDATES),
     headings: (scan.headings || []).slice(0, mode === "detail" ? 8 : 4),
-    text: mode === "detail" ? cleanText(scan.page_text_sample, 700) : cleanText(scan.page_text_sample, 320)
+    text: mode === "detail" ? cleanText(scan.page_text_sample, 1400) : cleanText(scan.page_text_sample, 700)
   }));
 }
 
