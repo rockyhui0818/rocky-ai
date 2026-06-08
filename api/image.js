@@ -4,6 +4,7 @@ const { filter, supabaseRequest } = require("./_lib/supabase");
 
 const MAX_REFERENCE_IMAGES = 6;
 const MAX_REFERENCE_BYTES = 1400000;
+const DEFAULT_IMAGE_CONCURRENCY = 1;
 const MAX_IMAGE_CONCURRENCY = 4;
 const PROVIDER_TIMEOUT_MS = Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 90000);
 const VERIFIED_IMAGE_BASE_URL = "http://154.64.230.35:3000/v1";
@@ -113,8 +114,8 @@ function normalizeImageModel(model) {
 }
 
 function normalizeImageConcurrency(value) {
-  const requested = Number(value || MAX_IMAGE_CONCURRENCY);
-  if (!Number.isFinite(requested)) return MAX_IMAGE_CONCURRENCY;
+  const requested = Number(value || DEFAULT_IMAGE_CONCURRENCY);
+  if (!Number.isFinite(requested)) return DEFAULT_IMAGE_CONCURRENCY;
   return Math.max(1, Math.min(Math.floor(requested), MAX_IMAGE_CONCURRENCY));
 }
 

@@ -4,7 +4,7 @@ const { filter, supabaseRequest } = require("./_lib/supabase");
 
 const MODEL_TIMEOUT_MS = 240000;
 const DIRECT_LINK_SCAN_TIMEOUT_MS = 6000;
-const BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = 60000;
+const BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = 20000;
 const MAX_SCAN_LINKS = 6;
 const MAX_IMAGE_CANDIDATES = 14;
 const MAX_MAIN_IMAGE_CANDIDATES = 6;
@@ -510,10 +510,15 @@ async function fetchProductHtml(url, signal) {
   const brightDataKey = process.env.BRIGHTDATA_API_KEY;
   const brightDataZone = process.env.BRIGHTDATA_ZONE || "web_unlocker1";
   if (brightDataKey) {
+    const brightDataController = new AbortController();
+    const relayAbort = () => brightDataController.abort();
+    signal?.addEventListener?.("abort", relayAbort, { once: true });
+    const brightDataTimeoutMs = Number(process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS || BRIGHTDATA_LINK_SCAN_TIMEOUT_MS);
+    const brightDataTimeout = setTimeout(() => brightDataController.abort(), brightDataTimeoutMs);
     try {
       const response = await fetch(BRIGHTDATA_API_URL, {
         method: "POST",
-        signal,
+        signal: brightDataController.signal,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${brightDataKey}`
@@ -538,6 +543,9 @@ async function fetchProductHtml(url, signal) {
       }
     } catch {
       // Fall through to direct fetch when Web Unlocker is unavailable.
+    } finally {
+      clearTimeout(brightDataTimeout);
+      signal?.removeEventListener?.("abort", relayAbort);
     }
   }
 
@@ -557,7 +565,10 @@ async function fetchProductHtml(url, signal) {
 
 async function scanProductLink(url, marketHint) {
   const controller = new AbortController();
-  const scanTimeoutMs = process.env.BRIGHTDATA_API_KEY ? BRIGHTDATA_LINK_SCAN_TIMEOUT_MS : DIRECT_LINK_SCAN_TIMEOUT_MS;
+  const brightDataTimeoutMs = Number(process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS || BRIGHTDATA_LINK_SCAN_TIMEOUT_MS);
+  const scanTimeoutMs = process.env.BRIGHTDATA_API_KEY
+    ? brightDataTimeoutMs + DIRECT_LINK_SCAN_TIMEOUT_MS + 2000
+    : DIRECT_LINK_SCAN_TIMEOUT_MS;
   const timeout = setTimeout(() => controller.abort(), scanTimeoutMs);
   try {
     const { response, html, scanner } = await fetchProductHtml(url, controller.signal);
@@ -1784,3 +1795,5 @@ module.exports = async function handler(req, res) {
 };
 
 module.exports.runGenerateWorkflow = runGenerateWorkflow;
+module.exports.scanProductLink = scanProductLink;
+module.exports.scanProductLinks = scanProductLinks;
