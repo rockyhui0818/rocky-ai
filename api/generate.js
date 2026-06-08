@@ -195,7 +195,7 @@ function cleanImageUrl(src = "") {
     .replace(/\\\//g, "/")
     .replace(/\\u0026/g, "&")
     .trim();
-  const imageMatch = decoded.match(/https?:\/\/[^\s"'<>\\]+?\.(?:jpg|jpeg|png|webp)/i);
+  const imageMatch = decoded.match(/https?:\/\/[^\s"'<>\\{}[\],]+?\.(?:jpg|jpeg|png|webp)(?:[^\s"'<>\\{}[\],]*)?/i);
   return String(imageMatch?.[0] || decoded)
     .replace(/["'}\]]+.*$/i, "")
     .replace(/%7D.*$/i, "")
@@ -216,6 +216,13 @@ function extractDynamicImageUrls(value = "") {
   }
   const found = Array.from(source.matchAll(/https?:\/\/[^\s"'<>\\{}[\]]+?\.(?:jpg|jpeg|png|webp)(?:[^\s"'<>\\{}[\]]*)?/gi)).map((item) => cleanImageUrl(item[0]));
   return [...urls, ...found].filter(Boolean);
+}
+
+function extractImageUrlsFromText(value = "") {
+  const source = decodeHtmlEntities(value).replace(/\\\//g, "/").replace(/\\u0026/g, "&");
+  return Array.from(source.matchAll(/https?:\/\/[^\s"'<>\\{}[\],]+?\.(?:jpg|jpeg|png|webp)(?:[^\s"'<>\\{}[\],]*)?/gi))
+    .map((item) => cleanImageUrl(item[0]))
+    .filter(Boolean);
 }
 
 function chooseAmazonGalleryUrl(item = {}) {
@@ -282,7 +289,7 @@ function extractImageUrlsFromHtml(fragment = "") {
   const urls = [];
   const patterns = [
     /data-a-dynamic-image=(["'])([\s\S]*?)\1/gi,
-    /\b(?:src|data-src|data-old-hires)=(["'])([\s\S]*?)\1/gi
+    /\b(?:src|data-src|data-old-hires|data-a-hires|srcset|data-srcset)=(["'])([\s\S]*?)\1/gi
   ];
   for (const pattern of patterns) {
     let match;
@@ -293,6 +300,7 @@ function extractImageUrlsFromHtml(fragment = "") {
       if (/^https?:\/\//i.test(source)) urls.push(source);
     }
   }
+  urls.push(...extractImageUrlsFromText(fragment));
   return urls.map(cleanImageUrl).filter(Boolean);
 }
 
@@ -302,14 +310,20 @@ function extractHtmlSections(html, markers = []) {
   for (const marker of markers) {
     let index = 0;
     const needle = marker.toLowerCase();
-    while ((index = lower.indexOf(needle, index)) !== -1 && sections.length < 12) {
+    let markerMatches = 0;
+    while ((index = lower.indexOf(needle, index)) !== -1 && markerMatches < 24) {
       const start = Math.max(0, index - 3000);
-      const end = Math.min(html.length, index + 45000);
+      const end = Math.min(html.length, index + 90000);
       sections.push(html.slice(start, end));
       index += needle.length;
+      markerMatches += 1;
     }
   }
-  return sections;
+  return sections
+    .map((section, index) => ({ section, index, imageCount: extractImageUrlsFromHtml(section).length }))
+    .sort((a, b) => Number(b.imageCount > 0) - Number(a.imageCount > 0) || b.imageCount - a.imageCount || a.index - b.index)
+    .slice(0, 36)
+    .map((item) => item.section);
 }
 
 function imagePositionLabel({ area, index, role }) {
@@ -381,15 +395,22 @@ function extractImageCandidates(html, baseUrl) {
     extractHtmlSections(html, [marker]).map((section) => ({ marker, section }))
   );
   let detailIndex = 0;
+  const detailSeen = new Set();
   for (const { marker, section } of detailSections) {
-    for (const src of extractImageUrlsFromHtml(section).slice(0, 16)) {
-      if (!src || isNonProductImage(src)) continue;
+    const sectionImages = extractImageUrlsFromHtml(section)
+      .map((src) => cleanImageUrl(src))
+      .filter((src) => src && !isNonProductImage(src) && isLikelyDetailImage(src));
+    let addedFromSection = 0;
+    for (const src of sectionImages) {
+      if (detailSeen.has(src)) continue;
+      detailSeen.add(src);
       detailIndex += 1;
+      addedFromSection += 1;
       const baseCandidate = {
         type: "detail-page-image",
         src: absolutizeUrl(src, baseUrl),
         alt: `Detail page/A+ content image from ${marker}`,
-        score: src.includes("m.media-amazon.com/images/I/") ? 10 : 6
+        score: src.includes("m.media-amazon.com/images/I/") ? 10 : src.includes("m.media-amazon.com/images/S/") ? 9 : 6
       };
       candidates.push(enrichImageCandidate(
         baseCandidate,
@@ -401,6 +422,7 @@ function extractImageCandidates(html, baseUrl) {
           confidence: "medium"
         }
       ));
+      if (addedFromSection >= 24) break;
     }
   }
 
@@ -440,9 +462,16 @@ function extractImageCandidates(html, baseUrl) {
       }
     }
   }
-  return Array.from(unique.values())
+  const uniqueValues = Array.from(unique.values());
+  const mainImages = uniqueValues
+    .filter((item) => item.type === "main-image")
     .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
-    .slice(0, MAX_IMAGE_CANDIDATES);
+    .slice(0, MAX_MAIN_IMAGE_CANDIDATES);
+  const detailImages = uniqueValues
+    .filter((item) => item.type === "detail-page-image")
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+    .slice(0, MAX_DETAIL_IMAGE_CANDIDATES);
+  return [...mainImages, ...detailImages].slice(0, MAX_IMAGE_CANDIDATES);
 }
 
 function isNonProductImage(src = "") {
@@ -450,10 +479,15 @@ function isNonProductImage(src = "") {
   return (
     value.includes("/oc-csi/") ||
     value.includes("fls-na.amazon.") ||
+    value.includes("/images/g/01/ad-feedback/") ||
+    value.includes("/images/g/01/advertising/preview_bg") ||
+    value.includes("/ad-feedback/") ||
+    value.includes("/advertising/preview_bg") ||
     value.includes("/error/") ||
     value.includes("/captcha/") ||
     value.includes("/sprites/") ||
     value.includes("nav-sprite") ||
+    value.includes("info-icon") ||
     value.includes("/gno/") ||
     value.includes("/omaha/") ||
     value.includes("/prime/") ||
@@ -462,6 +496,17 @@ function isNonProductImage(src = "") {
     value.includes("transparent-pixel") ||
     value.includes("pixel.gif") ||
     value.includes("logo._")
+  );
+}
+
+function isLikelyDetailImage(src = "") {
+  const value = String(src || "").toLowerCase();
+  return (
+    value.includes("m.media-amazon.com/images/i/") ||
+    value.includes("m.media-amazon.com/images/s/") ||
+    value.includes("aplus") ||
+    value.includes("media-library") ||
+    value.includes("thumbnail_")
   );
 }
 
