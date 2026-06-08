@@ -31,6 +31,20 @@ create table if not exists public.usage_logs (
 
 create index if not exists usage_logs_account_created_idx on public.usage_logs(account_id, created_at desc);
 
+create table if not exists public.generate_jobs (
+  id text primary key,
+  status text not null default 'queued',
+  stage text not null default 'queued',
+  progress integer not null default 0,
+  message text not null default '任务已创建，等待开始。',
+  result jsonb,
+  error jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists generate_jobs_updated_idx on public.generate_jobs(updated_at desc);
+
 insert into public.accounts (username, password_hash, name, role, status, quota, used, platforms, models)
 values
   (

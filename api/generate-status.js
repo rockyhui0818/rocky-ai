@@ -10,7 +10,7 @@ module.exports = async function handler(req, res) {
 
   const url = new URL(req.url, "http://localhost");
   const id = url.searchParams.get("id") || "";
-  const job = getJob(id);
+  const job = await getJob(id);
   if (!job) {
     return sendJson(res, 404, {
       error: "JOB_NOT_FOUND",

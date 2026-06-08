@@ -891,21 +891,21 @@ function buildPromptPack() {
   const autoImagePrompt = [
     `角色：你是巴西电商视觉总监和葡语转化文案专家。`,
     `模型优先级：默认第一优先级使用 ChatGPT 5.5 Pro 最高级模型（API 模型标识：gpt-5.5）进行链接拆解、关键词判断、图片提示词和详情页生成；其他 API 仅作为备用或人工指定。`,
-    `强制分析顺序：第一步，先用模型完整解析美国链接的主图和详情页，逐项记录图片设计、页面架构、风格、色彩、字体/图标风格、视觉层级、模块顺序、表达内容、痛点、对比逻辑和转化路径。第二步，用同样维度解析巴西链接的主图和详情页，记录本土语言、生活场景、信任元素、价格敏感点、平台习惯和消费者关注点。第三步，最终生成时整体设计逻辑、架构和风格跟随美国链接，内容语言、场景和信任表达根据巴西链接本土化。`,
-    `图生图基准：上传的 ${imageCount} 张产品图片是基础产品输入。可以参考/复刻美国竞品链接的外观方向、包装形态、颜色、材质表达、版式和视觉风格，但必须移除竞品 logo、品牌名、商标、水印和可识别 IP。`,
+    `强制分析顺序：第一步，先用模型完整解析美国链接的主图和详情页，逐项记录图片设计、页面架构、风格、色彩、字体/图标风格、视觉层级、模块顺序、表达内容、痛点、对比逻辑和转化路径。第二步，如果有巴西链接，用同样维度解析巴西链接的主图和详情页，只记录本土语言、生活场景、信任元素、价格敏感点、平台习惯和消费者关注点。第三步，最终生成时整体设计逻辑、架构、版式和风格跟随美国链接；没有巴西链接时直接按美国链接生成，只保留必要葡语表达。`,
+    `图生图基准：上传的 ${imageCount} 张产品图片是唯一产品外观基准。美国/巴西链接只能参考结构、构图、版式、视觉风格、场景、光影、信息层级和文案方向；不得改变产品形状、颜色、包装、配件、材质或可见细节；必须移除竞品 logo、品牌名、商标、水印和可识别 IP。`,
     `目标：基于上传产品图片生成符合 ${platform.label} 的主图、卖点图、场景图和详情页模块图。`,
     `产品：${productName}`,
     `巴西市场定位：重视价格感、耐用性、清晰规格、快速理解和真实使用场景。`,
     `链接拆解来源：${urlInfo.domains.join(", ")}；平台线索：${urlInfo.platformGuesses.join(", ")}；ID 线索：${urlInfo.ids.join(", ") || "无"}`,
     `跨市场参考策略：${urlInfo.summary}`,
-    `美国竞品链接分析是主要方向：必须把美国链接主图与详情页的设计拆成可执行设计蓝图，包括外观方向、包装形态、色彩系统、构图比例、信息层级、模块架构、场景表达、图标/标注方式、对比方式和消费者购买理由；可以参考/复刻竞品外观包装和颜色，但不得出现竞品品牌 logo、商标、品牌名或水印。`,
-    `巴西链接只做本土化分析：用同样维度解析巴西主图和详情页，但最终只抽取更本土的葡语短句、当地生活场景、价格敏感点、信任背书、配送/售后表达、平台规则和移动端阅读习惯。`,
+    `美国竞品链接分析是主要方向：必须把美国链接主图与详情页的设计拆成可执行设计蓝图，包括结构、构图比例、信息层级、模块架构、视觉风格、场景表达、图标/标注方式、对比方式和消费者购买理由；不得把竞品产品外观、包装、颜色、配件或材质当成最终产品外观。`,
+    `巴西链接只做本土化分析：有巴西链接时，用同样维度解析巴西主图和详情页，但最终只抽取更本土的葡语短句、当地生活场景、价格敏感点、信任背书、配送/售后表达、平台规则和移动端阅读习惯；没有巴西链接时直接参考美国链接生成。`,
     `Review Insights 辅助权重：美国/巴西 review 只用于校准真实打动用户的卖点、暴露高频差评点、提取自然葡语/英语评价语气和真实使用场景；不得覆盖上传产品图、美国主图结构和美国详情页结构。`,
     `关键词信号：${keywords.join(", ") || "待补充"}${manualKeywords.length ? "（人工修正关键词，优先级最高）" : "（自动拆解关键词）"}`,
     `核心卖点：${sellingPoints.join("；") || "请根据产品图识别材质、功能、使用场景和差异化优势"}`,
     `图片规则：${platform.imageRules.join(" ")}`,
     `输出图片：每次生成一张独立图片，最终队列包含 1 张平台合规主图 + 多张副图，覆盖细节、尺寸、使用场景、包装清单、对比和痛点解决。`,
-    `视觉要求：以上传图为图生图起点，可根据竞品参考优化/改造外观、包装、颜色、背景、光线、构图、道具环境和巴西葡萄牙语短文案；手机端可读；避免水印、平台 Logo、虚假折扣、医疗功效、绝对化承诺。`,
+    `视觉要求：以上传图为唯一产品外观基准，只可根据链接参考优化背景、光线、构图、道具环境、信息层级和巴西葡萄牙语短文案；不得优化/改造产品外观、包装、颜色、配件、材质或可见细节；手机端可读；避免水印、平台 Logo、虚假折扣、医疗功效、绝对化承诺。`,
     `负面提示词：competitor brand logo, trademark, brand name, watermark, platform logo, recognizable IP, unreadable text, fake discount badge, medical claim, exaggerated guarantee.`
   ].join("\n");
 
@@ -1497,10 +1497,13 @@ function renderImageAnalysisQueue(result = {}) {
       <div class="scan-image-list">
         ${units.map((unit, index) => {
           const analysis = analyses.find((item) => item?.unit_id === unit.id) || analyses[index] || {};
-          const takeaways = Array.isArray(analysis.prompt_takeaways) ? analysis.prompt_takeaways.slice(0, 3).join(" / ") : "";
+          const takeawaysSource = Array.isArray(analysis.takeaways) ? analysis.takeaways : analysis.prompt_takeaways;
+          const takeaways = Array.isArray(takeawaysSource) ? takeawaysSource.slice(0, 3).join(" / ") : "";
+          const position = unit.source_position || `${unit.section || "image"} · ${unit.inferred_type || unit.image_type || "image"}`;
+          const confidence = unit.position_confidence ? ` · 位置置信度：${unit.position_confidence}` : "";
           return `
             <a href="${escapeHtml(unit.image_url || "#")}" target="_blank" rel="noreferrer">
-              <strong>${escapeHtml(`#${index + 1} ${unit.market || "unknown"} · ${unit.section || "image"} · ${unit.inferred_type || unit.image_type || "image"}`)}</strong>
+              <strong>${escapeHtml(`#${index + 1} ${unit.market || "unknown"} · ${position}${confidence}`)}</strong>
               <small>${escapeHtml(analysis.skipped ? `待分析：${analysis.reason || ""}` : (takeaways || analysis.layout || unit.alt || unit.page_title || "已作为单张图片喂给模型分析"))}</small>
             </a>
           `;
@@ -1632,8 +1635,8 @@ function renderScanEvidenceItem(scan) {
         <div class="scan-image-list">
           ${images.map((image) => `
             <a href="${escapeHtml(image.src)}" target="_blank" rel="noreferrer">
-              <strong>${escapeHtml(image.type || "image")}</strong>
-              <small>${escapeHtml(image.alt || image.src)}</small>
+              <strong>${escapeHtml(image.source_position || image.type || "image")}</strong>
+              <small>${escapeHtml([image.inferred_role || image.type, image.position_confidence ? `置信度 ${image.position_confidence}` : "", image.alt || image.src].filter(Boolean).join(" · "))}</small>
             </a>
           `).join("")}
         </div>
@@ -2283,53 +2286,68 @@ function buildImagePromptQueue(pack) {
   const consistency = [
     `产品：${pack.productName}`,
     `用户最终定制提示词：${pack.imagePrompt}`,
-    `生成逻辑：设计结构、页面架构、视觉层级、色彩风格、模块顺序和表达框架优先跟随美国链接拆解结果；葡语文案、人物/家庭/办公/户外场景、信任表达、配送售后和消费者语境根据巴西链接本土化。`,
-    `图生图基准：上传产品图片是基础产品输入；允许参考/复刻美国竞品链接的外观、包装、颜色、材质表达、版式和视觉风格。`,
-    `美国链接必须先拆主图与详情页的设计、架构、风格、色彩和表达内容；巴西链接必须用同样维度拆解，但只用于本土化语言、场景和信任要素。`,
-    `可以把链接里的竞品外观、颜色、包装和版式作为参考方向，但必须去品牌化：不出现竞品 logo、商标、品牌名、水印或可识别 IP。`,
+    `生成逻辑：设计结构、页面架构、视觉层级、色彩风格、模块顺序和表达框架优先跟随美国链接拆解结果；如果没有巴西链接，直接按美国链接的结构、版式和风格生成，只保留必要葡语表达。`,
+    `图生图基准：上传产品图片是唯一产品外观基准；美国链接只参考结构、构图、版式、视觉风格、场景、光影和信息层级。`,
+    `美国链接必须先拆主图与详情页的设计、架构、风格、色彩和表达内容；巴西链接存在时只用于本土化语言、场景和信任要素。`,
+    `不得把链接里的竞品产品外观、颜色、包装、配件或材质用于改变上传产品；必须去品牌化：不出现竞品 logo、商标、品牌名、水印或可识别 IP。`,
     `每次只生成一张独立图片，不要拼图，不要四宫格。`,
     `如果目标尺寸与 API 输出尺寸不同，请按目标尺寸构图，在 ${getSelectedImageSizeProfile().apiSize || "1024x1024"} 画布中保留可裁切安全区。`
   ].join("\n");
   return [
     withTargetSpec(
-      "main",
-      "平台主图",
+      "white_main",
+      "1. 白底主图",
       `${consistency}\n生成一张平台合规白底主图：产品居中，高清真实摄影，无文字、无水印、无 logo，优先满足目标平台的上传尺寸和裁切规则。`
     ),
     withTargetSpec(
-      "infographic",
-      "卖点信息图",
-      `${consistency}\n生成一张独立卖点信息图：主要参考美国链接的主图卖点表达和信息层级；保持产品主体一致，加入少量巴西葡语短卖点和清晰指示线，移动端可读，背景干净。关键词：${pack.keywords.slice(0, 8).join(", ")}。`
-    ),
-    withTargetSpec(
-      "lifestyle",
-      "巴西场景主图",
+      "brazil_scene",
+      "2. 巴西场景图",
       `${consistency}\n生成一张独立巴西本土生活场景图：主构图参考美国链接里的使用场景和视觉方向，外观包装和色彩可参考竞品，场景换成本土化巴西家庭、办公室、出行或日常环境；去除品牌标识，光线自然。`
     ),
     withTargetSpec(
-      "detail",
-      "尺寸细节图",
+      "portuguese_infographic",
+      "3. 葡语卖点信息图",
+      `${consistency}\n生成一张独立卖点信息图：主要参考美国链接的主图卖点表达和信息层级；保持产品主体一致，加入 3-5 条巴西葡语短卖点和清晰指示线，移动端可读。关键词：${pack.keywords.slice(0, 8).join(", ")}。`
+    ),
+    withTargetSpec(
+      "dimension_detail",
+      "4. 尺寸细节图",
       `${consistency}\n生成一张独立尺寸与细节图：参考美国链接的细节展示方式和包装表现，突出材质、接口、尺寸、包装内容或关键结构；去除竞品 logo/品牌名，葡语标注简洁清晰。`
     ),
     withTargetSpec(
-      "detail-benefits",
-      "详情页卖点模块图",
+      "advantage_comparison",
+      "5. 优势对比图",
+      `${consistency}\n生成一张独立优势对比图：参考美国链接的对比逻辑、版式和视觉风格，结合巴西 review 的差评预防与本土痛点，突出本产品相对普通方案的优势；不出现竞品品牌、不攻击竞品。`
+    ),
+    withTargetSpec(
+      "detail_hero_banner",
+      "6. 详情页顶部视觉海报",
+      `${consistency}\n生成一张详情页顶部 Hero 视觉海报：参考美国链接首屏海报的视觉冲击、构图和色彩，转成巴西葡语核心口号和本土化信任表达，建立第一印象。`
+    ),
+    withTargetSpec(
+      "detail_core_features",
+      "7. 详情页核心卖点",
       `${consistency}\n生成一张独立详情页卖点模块图：主要参考美国链接里的详情页模块结构、视觉层级、卖点排序、外观包装和设计方向；巴西链接用于短句、本土场景和信任表达本地化。展示产品、3 个核心 beneficio、简洁葡语短句、干净高级背景，不出现竞品品牌。`
     ),
     withTargetSpec(
-      "detail-usage",
-      "详情页使用步骤图",
-      `${consistency}\n生成一张独立详情页使用步骤图：参考美国链接的步骤模块结构、包装风格和色彩，转化为巴西葡语 modo de uso，使用本土化场景表达；去品牌化，不要拼成合集。`
+      "detail_lifestyle",
+      "8. 详情页生活方式",
+      `${consistency}\n生成一张详情页生活方式模块图：参考美国详情页的生活方式场景、审美调性和情绪表达，换成巴西家庭、办公室、出行或户外真实语境；去品牌化，不要拼成合集。`
     ),
     withTargetSpec(
-      "detail-comparison",
-      "详情页对比模块图",
-      `${consistency}\n生成一张独立详情页对比模块图：参考美国链接的对比逻辑、版式和视觉风格，突出本产品相对普通方案的优势；可参考竞品外观包装方向，但不出现竞品品牌、不攻击竞品。`
+      "detail_technical_specs",
+      "9. 详情页细节技术说明",
+      `${consistency}\n生成一张详情页细节技术说明图：参考美国链接的微距细节、规格表、使用方法和注意事项，结合巴西差评点提前解释尺寸、材质、适配和包装内容。`
     ),
     withTargetSpec(
-      "detail-package",
-      "包装清单模块图",
-      `${consistency}\n生成一张独立包装清单或规格模块图：展示实际包含内容、规格参数和注意事项；不得添加上传图和用户描述中不存在的配件，葡语短句本土化。`
+      "detail_faq",
+      "10. 详情页 FAQ",
+      `${consistency}\n生成一张详情页 FAQ 图：参考美国详情页答疑结构，结合巴西 review 的疑问和差评预防，用自然葡语回答使用步骤、适用人群、尺寸、包装和注意事项。`
+    ),
+    withTargetSpec(
+      "detail_product_line_comparison",
+      "11. 详情页产品线对比",
+      `${consistency}\n生成一张详情页产品线对比图：参考美国链接的表格结构和交叉销售逻辑，使用巴西消费者关注的规格、用途、性价比和适用场景进行对比；不出现竞品品牌。`
     )
   ];
 }
@@ -2337,19 +2355,29 @@ function buildImagePromptQueue(pack) {
 function normalizePromptType(type, index) {
   const raw = String(type || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   const map = {
-    white_main: "main",
+    white_main: "white_main",
     main_image: "main",
     main: "main",
+    brazil_scene: "brazil_scene",
     lifestyle: "lifestyle",
-    lifestyle_usage: "detail-usage",
-    infographic: "infographic",
-    details_specs: "detail",
-    detail_specs: "detail",
-    comparison: "detail-comparison",
-    comparison_chart: "detail-comparison",
-    hero_banner: "detail-hero",
-    core_features: "detail-benefits",
-    faq: "detail-faq"
+    portuguese_infographic: "portuguese_infographic",
+    infographic: "portuguese_infographic",
+    dimension_detail: "dimension_detail",
+    details_specs: "dimension_detail",
+    detail_specs: "dimension_detail",
+    advantage_comparison: "advantage_comparison",
+    comparison: "advantage_comparison",
+    detail_hero_banner: "detail_hero_banner",
+    hero_banner: "detail_hero_banner",
+    detail_core_features: "detail_core_features",
+    core_features: "detail_core_features",
+    detail_lifestyle: "detail_lifestyle",
+    lifestyle_usage: "detail_lifestyle",
+    detail_technical_specs: "detail_technical_specs",
+    detail_faq: "detail_faq",
+    faq: "detail_faq",
+    detail_product_line_comparison: "detail_product_line_comparison",
+    comparison_chart: "detail_product_line_comparison"
   };
   return map[raw] || (index >= 5 ? `detail-${raw || index + 1}` : raw || `image-${index + 1}`);
 }
@@ -2364,15 +2392,15 @@ function buildRemoteImagePromptQueue(pack) {
 
   const consistency = [
     `产品：${pack.productName}`,
-    `图生图基准：使用上传产品图片作为基础产品输入。`,
-    `允许参考/复刻美国竞品的外观方向、包装形态、颜色、材质表达、版式和视觉风格。`,
-    `美国链接只参考构图、模块、风格、色彩和信息层级；巴西链接只参考葡语表达、本土场景和信任点。`,
+    `图生图基准：上传产品图片是唯一产品外观基准，不得改变产品形状、颜色、包装、配件、材质或可见细节。`,
+    `美国链接只参考结构、构图、模块、版式、视觉风格、场景、光影和信息层级。`,
+    `如果没有巴西链接或巴西图片证据，直接按美国链接的结构、版式和风格生成；巴西链接存在时也只参考葡语表达、本土场景和信任点。`,
     `Review Insights 只用于补充高频好评点、差评预防、真实使用场景和本土评价语气，不能覆盖主视觉结构。`,
     `必须去品牌化：不出现竞品 logo、商标、品牌名、水印、平台 logo 或可识别 IP。`,
     `每次只生成一张独立图片，不要拼图，不要四宫格。`
   ].join("\n");
 
-  return prompts.slice(0, 12).map((item, index) => {
+  return prompts.slice(0, 11).map((item, index) => {
     const type = normalizePromptType(item?.type || item?.module || item?.kind, index);
     const label = item?.label || item?.title || item?.type || `模型提示词 ${index + 1}`;
     const sourceLogic = item?.source_logic ? `参考美国链接逻辑：${item.source_logic}` : "";

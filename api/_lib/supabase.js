@@ -12,16 +12,33 @@ function assertConfigured() {
 async function supabaseRequest(path, options = {}) {
   assertConfigured();
   const url = `${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/${path}`;
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: "return=representation",
-      ...(options.headers || {})
-    }
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "return=representation",
+        ...(options.headers || {})
+      }
+    });
+  } catch (fetchError) {
+    const error = new Error(`Supabase network request failed: ${fetchError.message}`);
+    error.code = "SUPABASE_NETWORK_FAILED";
+    error.details = {
+      url_host: (() => {
+        try {
+          return new URL(SUPABASE_URL).host;
+        } catch {
+          return "invalid-supabase-url";
+        }
+      })(),
+      cause: fetchError.message
+    };
+    throw error;
+  }
 
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;

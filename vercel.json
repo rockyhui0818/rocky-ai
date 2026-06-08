@@ -3,6 +3,12 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "functions": {
+    "api/generate-job.js": {
+      "maxDuration": 300
+    },
+    "api/generate.js": {
+      "maxDuration": 300
+    },
     "api/image.js": {
       "maxDuration": 120
     }

@@ -2,7 +2,7 @@ const { getAccountByToken, publicAccount } = require("./_lib/auth");
 const { getBearerToken, handleOptions, readJson, sendJson } = require("./_lib/http");
 const { filter, supabaseRequest } = require("./_lib/supabase");
 
-const MODEL_TIMEOUT_MS = 120000;
+const MODEL_TIMEOUT_MS = 240000;
 const DIRECT_LINK_SCAN_TIMEOUT_MS = 6000;
 const BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = 60000;
 const MAX_SCAN_LINKS = 6;
@@ -13,12 +13,12 @@ const MAX_HEADINGS = 10;
 const MAX_REVIEW_SNIPPETS = 8;
 const PAGE_TEXT_SAMPLE_LENGTH = 900;
 const DEFAULT_MAX_COMPLETION_TOKENS = 900;
-const DEFAULT_SYNTHESIS_MAX_TOKENS = 1100;
+const DEFAULT_SYNTHESIS_MAX_TOKENS = 4200;
 const STEP_IMAGE_LIMIT = 1;
-const MAX_IMAGE_ANALYSIS_UNITS = 10;
-const MAX_IMAGE_ANALYSIS_UNITS_PER_BUCKET = 3;
-const IMAGE_ANALYSIS_BUDGET_MS = 85000;
-const REVIEW_ANALYSIS_BUDGET_TOKENS = 450;
+const MAX_IMAGE_ANALYSIS_UNITS = 44;
+const IMAGE_ANALYSIS_CONCURRENCY = 4;
+const IMAGE_ANALYSIS_BUDGET_MS = 220000;
+const REVIEW_ANALYSIS_BUDGET_TOKENS = 900;
 const BRIGHTDATA_API_URL = "https://api.brightdata.com/request";
 const USEFUL_IMAGE_TYPES = new Set(["main-image", "detail-page-image"]);
 const LISTING_IMAGE_TYPES = [
@@ -35,6 +35,118 @@ const DETAIL_MODULE_TYPES = [
   "details_specs",
   "faq",
   "comparison_chart"
+];
+const IMAGE_PROMPT_SLOTS = [
+  {
+    sequence: 1,
+    type: "white_main",
+    label: "1. 白底主图",
+    section: "main",
+    role: "white_main",
+    us_focus: "美国链接白底主图/图库首图：产品摆放、包装外观、光影、白底比例、主视觉质感。",
+    br_focus: "巴西链接主图：当地平台主图干净度、裁切比例、消费者信任表达。",
+    objective: "只展示产品本体，清晰、无文字、无水印、无 logo，适合平台首图。"
+  },
+  {
+    sequence: 2,
+    type: "brazil_scene",
+    label: "2. 巴西场景图",
+    section: "main",
+    role: "lifestyle",
+    us_focus: "美国链接场景图：使用姿态、空间构图、人物/道具关系、情绪氛围。",
+    br_focus: "巴西链接场景图：巴西家庭、办公室、出行、户外或日常语境。",
+    objective: "把美国场景设计方向本地化到巴西真实生活环境，突出真实使用。"
+  },
+  {
+    sequence: 3,
+    type: "portuguese_infographic",
+    label: "3. 葡语卖点信息图",
+    section: "main",
+    role: "infographic",
+    us_focus: "美国链接卖点图：信息层级、图标/箭头、卖点数量、排版节奏。",
+    br_focus: "巴西链接卖点图：自然葡语短句、本土痛点、信任词和移动端可读性。",
+    objective: "用葡语短句表达 3-5 个最强卖点，读图即懂。"
+  },
+  {
+    sequence: 4,
+    type: "dimension_detail",
+    label: "4. 尺寸细节图",
+    section: "main",
+    role: "details_specs",
+    us_focus: "美国链接细节/尺寸图：材质、接口、容量、规格、包装内容的展示方式。",
+    br_focus: "巴西链接细节图：当地消费者关心的尺寸、适配、配件、使用难度。",
+    objective: "展示真实尺寸、材质、接口、容量、规格或包装内容，不虚构参数。"
+  },
+  {
+    sequence: 5,
+    type: "advantage_comparison",
+    label: "5. 优势对比图",
+    section: "main",
+    role: "comparison",
+    us_focus: "美国链接对比图：普通方案 vs 本产品的版式、对比维度和视觉强调。",
+    br_focus: "巴西链接对比图：当地未满足需求、价格敏感点、质量/配送/使用疑虑。",
+    objective: "与普通方案对比优势，不攻击竞品，不出现竞品品牌。"
+  },
+  {
+    sequence: 6,
+    type: "detail_hero_banner",
+    label: "6. 详情页顶部视觉海报",
+    section: "detail",
+    role: "hero_banner",
+    us_focus: "美国详情页 Hero：首屏视觉冲击、品牌调性、口号位置、全宽构图。",
+    br_focus: "巴西详情页 Hero：葡语口号、本土审美、信任和使用场景。",
+    objective: "详情页第一屏定调，产品和核心 slogan 建立信任。"
+  },
+  {
+    sequence: 7,
+    type: "detail_core_features",
+    label: "7. 详情页核心卖点",
+    section: "detail",
+    role: "core_features",
+    us_focus: "美国详情页核心卖点模块：3-4 个功能拆解、网格/侧文版式、视觉层级。",
+    br_focus: "巴西详情页卖点模块：葡语表达、痛点词、信任点、本土购买理由。",
+    objective: "拆解 3-4 个核心卖点，解决痛点，文字只做辅助。"
+  },
+  {
+    sequence: 8,
+    type: "detail_lifestyle",
+    label: "8. 详情页生活方式",
+    section: "detail",
+    role: "lifestyle_usage",
+    us_focus: "美国详情页生活方式模块：人物/场景、情绪、审美调性、使用前后关系。",
+    br_focus: "巴西详情页生活方式模块：家庭、办公室、出行、户外等本土使用语境。",
+    objective: "建立情感共鸣和代入感，证明产品符合巴西目标客群审美。"
+  },
+  {
+    sequence: 9,
+    type: "detail_technical_specs",
+    label: "9. 详情页细节技术说明",
+    section: "detail",
+    role: "details_specs",
+    us_focus: "美国详情页技术说明：微距、结构、规格表、使用方法和注意事项。",
+    br_focus: "巴西详情页技术说明：降低误解/退货的尺寸、材质、适配和使用说明。",
+    objective: "用细节图和清晰规格管理预期，降低退货率。"
+  },
+  {
+    sequence: 10,
+    type: "detail_faq",
+    label: "10. 详情页 FAQ",
+    section: "detail",
+    role: "faq",
+    us_focus: "美国详情页 FAQ/答疑：常见购买障碍、适用人群、使用步骤。",
+    br_focus: "巴西 review 和详情页疑问：尺寸、质量、包装、物流、使用难度。",
+    objective: "主动回答最后购买障碍，缩短决策时间。"
+  },
+  {
+    sequence: 11,
+    type: "detail_product_line_comparison",
+    label: "11. 详情页产品线对比",
+    section: "detail",
+    role: "comparison_chart",
+    us_focus: "美国详情页产品线对比：表格结构、产品差异、交叉销售逻辑。",
+    br_focus: "巴西详情页对比：当地消费者选择标准、性价比、规格/用途区分。",
+    objective: "用同品牌产品线或普通方案对比，帮助用户选择并促进交叉销售。"
+  }
 ];
 
 function extractText(data) {
@@ -123,29 +235,56 @@ function extractHtmlSections(html, markers = []) {
   return sections;
 }
 
+function imagePositionLabel({ area, index, role }) {
+  const areaLabel = area === "detail" ? "详情页/A+模块" : "主图图库";
+  const roleLabel = role ? ` · ${role}` : "";
+  return `${areaLabel}第 ${index} 张${roleLabel}`;
+}
+
+function enrichImageCandidate(candidate, { area, index, role, sourceMarker, confidence }) {
+  return {
+    ...candidate,
+    source_area: area,
+    position_index: index,
+    source_position: imagePositionLabel({ area, index, role }),
+    source_marker: sourceMarker || "",
+    inferred_role: role || classifyImageCandidate(candidate),
+    position_confidence: confidence || "medium"
+  };
+}
+
 function extractImageCandidates(html, baseUrl) {
   const candidates = [];
   const ogImage = extractMeta(html, "og:image");
   if (ogImage && !isNonProductImage(ogImage)) {
-    candidates.push({ type: "main-image", src: absolutizeUrl(ogImage, baseUrl), alt: "Open Graph product image", score: 12 });
+    candidates.push(enrichImageCandidate(
+      { type: "main-image", src: absolutizeUrl(ogImage, baseUrl), alt: "Open Graph product image", score: 12 },
+      { area: "main", index: 1, role: "white_main", sourceMarker: "og:image", confidence: "medium" }
+    ));
   }
 
   const dynamicImageBlocks = Array.from(html.matchAll(/data-a-dynamic-image=["']([^"']+)["']/gi));
+  let galleryIndex = 0;
   for (const block of dynamicImageBlocks.slice(0, 12)) {
     const decodedBlock = decodeHtmlEntities(block[1]).replace(/\\\//g, "/").replace(/\\u0026/g, "&");
     const urls = Array.from(decodedBlock.matchAll(/https?:\/\/[^\s"'<>\\]+?\.(?:jpg|jpeg|png|webp)/gi)).map((match) => cleanImageUrl(match[0]));
     for (const src of urls.slice(0, 8)) {
       if (!src || isNonProductImage(src)) continue;
-      candidates.push({
-        type: "main-image",
-        src: absolutizeUrl(src, baseUrl),
-        alt: "Amazon product gallery image",
-        score: 12
-      });
+      galleryIndex += 1;
+      const role = galleryIndex === 1 ? "white_main" : "supporting";
+      candidates.push(enrichImageCandidate(
+        {
+          type: "main-image",
+          src: absolutizeUrl(src, baseUrl),
+          alt: galleryIndex === 1 ? "Amazon product gallery hero/main image" : `Amazon product gallery image ${galleryIndex}`,
+          score: galleryIndex === 1 ? 14 : 12
+        },
+        { area: "main", index: galleryIndex, role, sourceMarker: "data-a-dynamic-image", confidence: "high" }
+      ));
     }
   }
 
-  const detailSections = extractHtmlSections(html, [
+  const detailMarkers = [
     "aplus",
     "a-plus",
     "dpx-aplus",
@@ -153,23 +292,45 @@ function extractImageCandidates(html, baseUrl) {
     "product-description",
     "detail-bullets",
     "feature-bullets"
-  ]);
-  for (const section of detailSections) {
+  ];
+  const detailSections = detailMarkers.flatMap((marker) =>
+    extractHtmlSections(html, [marker]).map((section) => ({ marker, section }))
+  );
+  let detailIndex = 0;
+  for (const { marker, section } of detailSections) {
     for (const src of extractImageUrlsFromHtml(section).slice(0, 16)) {
       if (!src || isNonProductImage(src)) continue;
-      candidates.push({
+      detailIndex += 1;
+      const baseCandidate = {
         type: "detail-page-image",
         src: absolutizeUrl(src, baseUrl),
-        alt: "Detail page/A+ content image",
+        alt: `Detail page/A+ content image from ${marker}`,
         score: src.includes("m.media-amazon.com/images/I/") ? 10 : 6
-      });
+      };
+      candidates.push(enrichImageCandidate(
+        baseCandidate,
+        {
+          area: "detail",
+          index: detailIndex,
+          role: classifyImageCandidate(baseCandidate),
+          sourceMarker: marker,
+          confidence: "medium"
+        }
+      ));
     }
   }
 
   const unique = new Map();
   for (const item of candidates) {
     if (!USEFUL_IMAGE_TYPES.has(item.type)) continue;
-    if (!unique.has(item.src)) unique.set(item.src, item);
+    if (!unique.has(item.src)) {
+      unique.set(item.src, item);
+    } else {
+      const existing = unique.get(item.src);
+      if ((item.position_confidence === "high" && existing.position_confidence !== "high") || Number(item.score || 0) > Number(existing.score || 0)) {
+        unique.set(item.src, { ...existing, ...item });
+      }
+    }
   }
   return Array.from(unique.values())
     .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
@@ -488,7 +649,13 @@ function compactScanResult(item = {}) {
           type: image.type,
           src: image.src,
           alt: cleanText(image.alt, 120),
-          score: image.score
+          score: image.score,
+          source_area: image.source_area || null,
+          source_position: image.source_position || null,
+          position_index: image.position_index || null,
+          source_marker: image.source_marker || null,
+          inferred_role: image.inferred_role || null,
+          position_confidence: image.position_confidence || null
       }))
       : [],
     review_insights: item.review_insights || null,
@@ -615,13 +782,167 @@ function imageUrlsFor(scans = [], mode, limit = 6) {
 }
 
 function classifyImageCandidate(image = {}) {
-  const source = `${image.type || ""} ${image.src || ""} ${image.alt || ""}`.toLowerCase();
-  if (source.includes("white") || source.includes("main") || source.includes("primary") || source.includes("principal")) return "white_main";
-  if (source.includes("lifestyle") || source.includes("scene") || source.includes("use") || source.includes("hero")) return "lifestyle";
-  if (source.includes("info") || source.includes("feature") || source.includes("benefit") || source.includes("aplus")) return "infographic";
-  if (source.includes("detail") || source.includes("spec") || source.includes("size") || source.includes("dimension")) return "details_specs";
-  if (source.includes("compare") || source.includes("comparison")) return "comparison";
+  const semanticSource = `${image.src || ""} ${image.alt || ""}`.toLowerCase();
+  const typeSource = String(image.type || "").toLowerCase();
+  if (semanticSource.includes("faq") || semanticSource.includes("question") || semanticSource.includes("pergunta")) return "faq";
+  if (semanticSource.includes("chart") || semanticSource.includes("compare") || semanticSource.includes("comparison") || semanticSource.includes("comparativo")) return "comparison_chart";
+  if (semanticSource.includes("hero") || semanticSource.includes("banner") || semanticSource.includes("brand-story")) return "hero_banner";
+  if (semanticSource.includes("lifestyle") || semanticSource.includes("scene") || semanticSource.includes("usage") || semanticSource.includes("use") || semanticSource.includes("vida") || semanticSource.includes("uso")) return "lifestyle";
+  if (semanticSource.includes("info") || semanticSource.includes("feature") || semanticSource.includes("benefit") || semanticSource.includes("aplus") || semanticSource.includes("plus") || semanticSource.includes("module")) return "infographic";
+  if (semanticSource.includes("detail") || semanticSource.includes("spec") || semanticSource.includes("size") || semanticSource.includes("dimension") || semanticSource.includes("material")) return "details_specs";
+  if (semanticSource.includes("white") || semanticSource.includes("main") || semanticSource.includes("primary") || semanticSource.includes("principal")) return "white_main";
+  if (typeSource === "main-image") return "white_main";
+  if (typeSource === "detail-page-image") return "supporting";
   return "supporting";
+}
+
+const SLOT_ROLE_ALIASES = {
+  white_main: ["white_main", "supporting"],
+  lifestyle: ["lifestyle", "hero_banner", "supporting"],
+  infographic: ["infographic", "core_features", "supporting"],
+  details_specs: ["details_specs", "supporting"],
+  comparison: ["comparison", "comparison_chart", "supporting"],
+  hero_banner: ["hero_banner", "lifestyle", "supporting"],
+  core_features: ["core_features", "infographic", "supporting"],
+  lifestyle_usage: ["lifestyle_usage", "lifestyle", "supporting"],
+  faq: ["faq", "details_specs", "supporting"],
+  comparison_chart: ["comparison_chart", "comparison", "supporting"]
+};
+
+function normalizedRole(value = "") {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function analysisRole(analysis = {}) {
+  return normalizedRole(analysis.image_role || analysis.inferred_type || analysis.role || "");
+}
+
+function unitMatchesSlot(unit = {}, analysis = {}, slot = {}) {
+  const role = analysisRole(analysis) || normalizedRole(unit.inferred_type);
+  const aliases = SLOT_ROLE_ALIASES[slot.role] || [slot.role];
+  return aliases.includes(role);
+}
+
+function scoreUnitForSlot(unit = {}, analysis = {}, slot = {}, market = "") {
+  let score = 0;
+  if (unit.market === market) score += 20;
+  if (unit.section === slot.section) score += 12;
+  if (unitMatchesSlot(unit, analysis, slot)) score += 10;
+  if (normalizedRole(unit.inferred_type) === slot.role || analysisRole(analysis) === slot.role) score += 8;
+  score += Math.min(Number(unit.score || 0), 6);
+  score -= Number(unit.id?.replace(/\D/g, "") || 0) * 0.01;
+  return score;
+}
+
+function compactImageAnalysis(analysis = {}) {
+  const takeaways = Array.isArray(analysis.takeaways) ? analysis.takeaways : analysis.prompt_takeaways;
+  const copyPoints = Array.isArray(analysis.copy_points) ? analysis.copy_points : analysis.claims_or_copy;
+  return {
+    unit_id: analysis.unit_id,
+    market: analysis.market,
+    section: analysis.section,
+    image_role: analysis.image_role,
+    layout: cleanText(analysis.layout, 420),
+    color_style: cleanText(analysis.color_style, 260),
+    visual_hierarchy: cleanText(analysis.visual_hierarchy, 360),
+    copy_points: Array.isArray(copyPoints) ? copyPoints.slice(0, 5) : [],
+    localization_notes: Array.isArray(analysis.localization_notes) ? analysis.localization_notes.slice(0, 5) : [],
+    takeaways: Array.isArray(takeaways) ? takeaways.slice(0, 6) : [],
+    brand_removal: Array.isArray(analysis.brand_removal) ? analysis.brand_removal.slice(0, 5) : [],
+    skipped: Boolean(analysis.skipped),
+    reason: analysis.reason || ""
+  };
+}
+
+function chooseUnitForSlot(imageUnits = [], analyses = {}, slot = {}, market = "us") {
+  const candidates = imageUnits
+    .filter((unit) => unit.market === market)
+    .map((unit) => ({
+      unit,
+      analysis: analyses[unit.id] || {},
+      score: scoreUnitForSlot(unit, analyses[unit.id] || {}, slot, market)
+    }))
+    .filter((item) => item.unit.section === slot.section || item.score >= 22)
+    .sort((a, b) => b.score - a.score);
+  return candidates[0] || null;
+}
+
+function buildPromptSlotEvidence(imageUnits = [], analyses = {}, reviewModifierAnalysis = {}) {
+  return IMAGE_PROMPT_SLOTS.map((slot) => {
+    const us = chooseUnitForSlot(imageUnits, analyses, slot, "us");
+    const br = chooseUnitForSlot(imageUnits, analyses, slot, "brazil");
+    const reviewLayer = slot.section === "detail"
+      ? reviewModifierAnalysis?.prompt_modifiers?.detail_pages
+      : reviewModifierAnalysis?.prompt_modifiers?.main_images;
+    return {
+      sequence: slot.sequence,
+      type: slot.type,
+      label: slot.label,
+      section: slot.section,
+      role: slot.role,
+      objective: slot.objective,
+      required_us_analysis: slot.us_focus,
+      required_brazil_analysis: slot.br_focus,
+      us_source: us ? {
+        unit_id: us.unit.id,
+        source_url: us.unit.source_url,
+        image_url: us.unit.image_url,
+        page_title: us.unit.page_title,
+        inferred_type: us.unit.inferred_type,
+        source_position: us.unit.source_position,
+        source_area: us.unit.source_area,
+        position_confidence: us.unit.position_confidence,
+        analysis: compactImageAnalysis(us.analysis)
+      } : null,
+      brazil_source: br ? {
+        unit_id: br.unit.id,
+        source_url: br.unit.source_url,
+        image_url: br.unit.image_url,
+        page_title: br.unit.page_title,
+        inferred_type: br.unit.inferred_type,
+        source_position: br.unit.source_position,
+        source_area: br.unit.source_area,
+        position_confidence: br.unit.position_confidence,
+        analysis: compactImageAnalysis(br.analysis)
+      } : null,
+      review_modifier: Array.isArray(reviewLayer) ? reviewLayer.slice(0, 3) : [],
+      fallback_rule: "如果某一侧没有对应图片证据，使用同市场同 section 最接近的图片分析；仍缺失时使用平台标准结构，但必须标明证据不足。"
+    };
+  });
+}
+
+function compactSlotEvidenceForModel(promptSlotEvidence = []) {
+  return promptSlotEvidence.map((slot) => ({
+    sequence: slot.sequence,
+    type: slot.type,
+    label: slot.label,
+    objective: slot.objective,
+    us: slot.us_source ? {
+      unit_id: slot.us_source.unit_id,
+      image_role: slot.us_source.analysis?.image_role || slot.us_source.inferred_type,
+      source_position: slot.us_source.source_position,
+      position_confidence: slot.us_source.position_confidence,
+      layout: slot.us_source.analysis?.layout || "",
+      color_style: slot.us_source.analysis?.color_style || "",
+      visual_hierarchy: slot.us_source.analysis?.visual_hierarchy || "",
+      copy_points: slot.us_source.analysis?.copy_points || [],
+      localization_notes: slot.us_source.analysis?.localization_notes || [],
+      takeaways: slot.us_source.analysis?.takeaways || []
+    } : null,
+    br: slot.brazil_source ? {
+      unit_id: slot.brazil_source.unit_id,
+      image_role: slot.brazil_source.analysis?.image_role || slot.brazil_source.inferred_type,
+      source_position: slot.brazil_source.source_position,
+      position_confidence: slot.brazil_source.position_confidence,
+      layout: slot.brazil_source.analysis?.layout || "",
+      color_style: slot.brazil_source.analysis?.color_style || "",
+      visual_hierarchy: slot.brazil_source.analysis?.visual_hierarchy || "",
+      copy_points: slot.brazil_source.analysis?.copy_points || [],
+      localization_notes: slot.brazil_source.analysis?.localization_notes || [],
+      takeaways: slot.brazil_source.analysis?.takeaways || []
+    } : null,
+    review_modifier: slot.review_modifier || []
+  }));
 }
 
 function imageInventoryFor(scans = []) {
@@ -641,20 +962,37 @@ function imageInventoryFor(scans = []) {
   return inventory.slice(0, 18);
 }
 
+function scoreCandidateForSlot(candidate = {}, slot = {}, market = "") {
+  let score = 0;
+  if (candidate.market === market) score += 40;
+  if (candidate.section === slot.section) score += 25;
+  const aliases = SLOT_ROLE_ALIASES[slot.role] || [slot.role];
+  if (candidate.inferred_type === slot.role) score += 24;
+  else if (aliases.includes(candidate.inferred_type)) score += 14;
+  if (candidate.section !== slot.section) score -= 20;
+  if (candidate.inferred_type === "supporting") score -= 4;
+  score += Math.min(Number(candidate.score || 0), 8);
+  return score;
+}
+
+function pickCandidateForSlot(pool = [], slot = {}, market = "") {
+  const candidates = pool
+    .filter((item) => item.market === market)
+    .map((item) => ({ item, score: scoreCandidateForSlot(item, slot, market) }))
+    .filter(({ item, score }) => item.section === slot.section || score >= 42)
+    .sort((a, b) => b.score - a.score);
+  return candidates[0]?.item || null;
+}
+
 function buildImageAnalysisUnits(scanResults = []) {
-  const units = [];
-  const bucketCounts = {};
+  const pool = [];
   for (const scan of scanResults.map(compactScanResult)) {
     const market = marketBucket(scan);
     for (const image of scan.image_candidates || []) {
       if (!image.src || !/^https?:\/\//i.test(image.src)) continue;
       const isDetail = image.type === "detail-page-image";
       const section = isDetail ? "detail" : "main";
-      const bucket = `${market}:${section}`;
-      if ((bucketCounts[bucket] || 0) >= MAX_IMAGE_ANALYSIS_UNITS_PER_BUCKET) continue;
-      bucketCounts[bucket] = (bucketCounts[bucket] || 0) + 1;
-      units.push({
-        id: `img_${units.length + 1}`,
+      pool.push({
         market,
         section,
         source_url: scan.url,
@@ -662,14 +1000,58 @@ function buildImageAnalysisUnits(scanResults = []) {
         page_description: scan.description,
         image_url: image.src,
         image_type: image.type,
-        inferred_type: classifyImageCandidate(image),
+        inferred_type: image.inferred_role || classifyImageCandidate(image),
+        source_area: image.source_area || section,
+        source_position: image.source_position || imagePositionLabel({ area: section, index: image.position_index || pool.length + 1, role: image.inferred_role || classifyImageCandidate(image) }),
+        position_index: image.position_index || null,
+        source_marker: image.source_marker || null,
+        position_confidence: image.position_confidence || "low",
         alt: image.alt,
         scan_scope: scan.scan_scope || null
       });
-      if (units.length >= MAX_IMAGE_ANALYSIS_UNITS) return units;
     }
   }
-  return units;
+
+  const selected = [];
+  const seen = new Set();
+  const addCandidate = (candidate) => {
+    if (!candidate) return;
+    const key = `${candidate.market}:${candidate.image_url}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    selected.push(candidate);
+  };
+
+  for (const slot of IMAGE_PROMPT_SLOTS) {
+    addCandidate(pickCandidateForSlot(pool, slot, "us"));
+    addCandidate(pickCandidateForSlot(pool, slot, "brazil"));
+    if (selected.length >= MAX_IMAGE_ANALYSIS_UNITS) break;
+  }
+
+  const supportingCandidates = pool
+    .map((item) => ({
+      item,
+      score:
+        (item.market === "us" ? 8 : item.market === "brazil" ? 7 : 2) +
+        (item.section === "main" ? 5 : 4) +
+        (item.inferred_type === "supporting" ? 0 : 3) +
+        Math.min(Number(item.score || 0), 8)
+    }))
+    .sort((a, b) => b.score - a.score)
+    .map(({ item }) => item);
+  for (const candidate of supportingCandidates) {
+    if (selected.length >= MAX_IMAGE_ANALYSIS_UNITS) break;
+    addCandidate(candidate);
+  }
+
+  if (!selected.length) {
+    for (const candidate of pool.slice(0, Math.min(MAX_IMAGE_ANALYSIS_UNITS, 6))) addCandidate(candidate);
+  }
+
+  return selected.slice(0, MAX_IMAGE_ANALYSIS_UNITS).map((unit, index) => ({
+    id: `img_${index + 1}`,
+    ...unit
+  }));
 }
 
 function buildSingleImageAnalysisPrompt({ unit, product }) {
@@ -683,10 +1065,11 @@ function buildSingleImageAnalysisPrompt({ unit, product }) {
     "任务：只分析这一张采集图片，不要分析其它图片，不要输出长文。",
     marketRole,
     typeGuide,
-    "必须记录：设计架构、版式、色彩、文字/卖点、可复刻方向、必须去除的品牌/IP 元素。",
+    "必须完整记录：设计架构、画面版式、色彩系统、光影/质感、产品/包装呈现方式、视觉层级、文字/卖点表达、情绪场景、可复刻方向、必须去除的品牌/IP 元素。",
+    "必须先参考 unit.source_position、unit.source_area、unit.position_confidence 判断这张图在页面中的位置；如果位置不确定，在 localization_notes 或 takeaways 中明确写“位置不确定”。",
     "不要分析 review，不要使用评价数据；本任务只处理这张图片本身。",
     "上传产品图仍是最终产品外观唯一基准；这张竞品图只提供风格、结构和内容方向。",
-    "输出 JSON：{unit_id,market,section,image_role,layout,color_style,visual_hierarchy,claims_or_copy:[最多3条],localization_notes:[最多3条],prompt_takeaways:[最多4条],brand_removal:[最多3条]}。",
+    "输出 JSON：{unit_id,market,section,image_role,layout,color_style,visual_hierarchy,claims_or_copy:[最多5条],localization_notes:[最多5条],takeaways:[最多6条],brand_removal:[最多5条]}。",
     JSON.stringify({ product: compactProduct(product), unit })
   ].join("\n");
 }
@@ -695,25 +1078,32 @@ function buildReviewModifierPrompt({ reviewEvidence, product }) {
   return [
     "任务：只分析 review 信号，把它变成最终图片提示词的修饰层。不要分析图片，不要改变产品外观。",
     "Review 权重低于上传产品图和美国链接图片结构；只能用于：卖点措辞校准、巴西葡语自然表达、真实使用场景、差评预防、竞品弱点补充。",
-    "输出 JSON：{high_frequency_praise:[最多5条],high_frequency_complaints:[最多5条],local_language:[最多8个],usage_scenarios:[最多5条],competitor_weaknesses:[最多5条],prompt_modifiers:{main_images:[最多5条],detail_pages:[最多5条],negative_constraints:[最多4条]},source_note}。",
+    "输出 JSON：{high_frequency_praise:[最多8条],high_frequency_complaints:[最多8条],local_language:[最多12个],usage_scenarios:[最多8条],competitor_weaknesses:[最多8条],prompt_modifiers:{main_images:[最多8条],detail_pages:[最多8条],negative_constraints:[最多6条]},source_note}。",
     JSON.stringify({ product: compactProduct(product), review_evidence: reviewEvidence })
   ].join("\n");
 }
 
-function buildSynthesisPrompt(payload, analyses, imageUnits = [], reviewModifierAnalysis = {}) {
+function buildSynthesisPrompt(payload, analyses, imageUnits = [], reviewModifierAnalysis = {}, promptSlotEvidence = []) {
   return [
-    "任务：综合逐张图片分析结果，输出最终可编辑提示词。不要重新分析原始链接，不要再请求观察其它图片。",
-    "逻辑：主图 = 美国主图设计方向 + 巴西主图本土化；详情页 = 美国详情页结构 + 巴西详情页本土化；上传产品图是基础产品输入，允许参考/复刻竞品外观、包装、颜色与版式，但必须去品牌化。",
-    "Review Modifier 是最后的修饰层，权重低于上传产品图和美国链接主图/详情页结构。只能修饰文案、葡语、本土场景、差评预防和卖点顺序，不得覆盖产品外观和设计结构。",
+    "任务：按固定 11 张图的顺序，逐张合成最终可编辑图生图提示词。不要重新分析原始链接，不要再请求观察其它图片。",
+    "核心流程必须逐张执行：每一张图 = 该槽位的美国图片分析作为主要设计结构 + 如果存在巴西图片分析则只作为本土化落地 + Review Modifier 作为最后文案/痛点修饰。",
+    "每张采集图都有 source_position/source_area/position_confidence，必须用这些字段确认它是主图图库第几张、详情页/A+ 第几张或具体模块位置；禁止把未知位置图片说成已确认模块。",
+    "美国链接权重：决定设计结构、图片架构、风格、色彩、构图、包装/外观参考、表达框架。",
+    "巴西链接权重：只决定葡语表达、本土使用场景、信任点、消费者语境和本土化优化。",
+    "如果没有上传或没有采集到 brazil_source，必须明确写：巴西对应图片未采集到，本图直接按美国链接图片结构、版式和风格生成；只做必要葡语表达，不虚构任何巴西图片证据。",
+    "Review 权重：低于上传产品图和链接图片结构，只能修饰高频好评点、差评预防、真实使用场景和自然葡语，不能改变产品外观或图片结构。",
+    "上传产品图权重最高：最终生成必须以用户上传产品图为唯一产品外观基准；美国/巴西链接只能参考结构、版式、风格、场景、信息层级和文案方向，不能改变产品形状、颜色、包装、配件或可见细节；必须去品牌化。",
+    "每条 prompt 必须是图生图指令，并明确：使用上传产品图作为基础产品输入；每次只生成一张独立图片；禁止拼图/四宫格；禁止竞品 logo、品牌名、商标、水印、平台 logo。",
     "输出 JSON 字段：",
     "workflow_analysis: {us_main,br_main,us_detail,br_detail,optimization_logic}",
     "review_insights: 直接整理 review_modifier_analysis，说明它如何修饰最终提示词。",
-    "link_analysis: 最多6项短证据摘要。",
-    "main_image_plan: 必须包含 white_main,lifestyle,infographic,details_specs,comparison 五类图片方向。",
-    "detail_page_plan: 必须包含 hero_banner,core_features,lifestyle_usage,details_specs,faq,comparison_chart 六个详情页模块方向。",
+    "link_analysis: 最多6项短证据摘要，必须说明美国图负责设计、巴西图负责本土化。",
+    "main_image_plan: 按顺序包含 white_main,brazil_scene,portuguese_infographic,dimension_detail,advantage_comparison。",
+    "detail_page_plan: 按顺序包含 detail_hero_banner,detail_core_features,detail_lifestyle,detail_technical_specs,detail_faq,detail_product_line_comparison。",
     "keywords: {auto: 最多8个, manual: 用户人工词, final: 最多10个}。",
-    "image_prompts: 生成 11 条简洁可编辑提示词对象；字段 {type,label,source_logic,br_localization,prompt}；前5条对应主图/附图类型，后6条对应详情页模块。",
-    "每条 prompt 控制在 45-75 字：上传产品图是基础产品输入；美国链接图片提供外观、包装、颜色、构图、模块和风格；巴西链接图片提供本土场景；review_modifier_analysis 只修饰葡语文案、卖点和差评预防；禁止 logo/商标/品牌名。",
+    "image_prompts: 必须刚好 11 条，顺序和 prompt_slots 完全一致；字段 {sequence,type,label,source_logic,us_source_unit,brazil_source_unit,br_localization,review_modifier,prompt}。",
+    "每条 source_logic 必须说明：先分析哪个 source_position 的美国图/美国模块，提取了什么设计结构；如有巴西图，再说明哪个 source_position 的巴西图如何本土化；如无巴西图，必须写明未采集到巴西对应图片并直接按美国链接生成。",
+    "每条 prompt 可以较完整，优先准确性而不是省 token：必须写清楚图生图、上传产品图基准、美国图设计结构、无巴西图时直接参考美国链接、Review 修饰、去品牌化、单张独立图、构图/色彩/文字/场景/细节要求。",
     "detail_page: {title_pt_br, bullets_pt_br: 5条以内, description_pt_br: 180字以内, faq_pt_br: 2条以内, platform_notes: 3条以内}。",
     "compliance_notes: 最多4条。",
     "usage_note: 一句话。",
@@ -723,14 +1113,82 @@ function buildSynthesisPrompt(payload, analyses, imageUnits = [], reviewModifier
       assets: payload.assets,
       constraints: payload.constraints,
       prompt_pack: payload.prompts,
-      image_analysis_units: imageUnits,
-      analyses,
+      prompt_slots: compactSlotEvidenceForModel(promptSlotEvidence),
       review_modifier_analysis: reviewModifierAnalysis
     })
   ].join("\n");
 }
 
-function fallbackSegmentedResult(payload, analysisFlow, analysisMeta, imageUnits = [], reviewModifierAnalysis = null) {
+function fallbackPromptForSlot(slot, evidence = {}) {
+  const usText = evidence.us_source
+    ? `美国证据 ${evidence.us_source.unit_id}（${evidence.us_source.source_position || "位置未标注"}）：${(evidence.us_source.analysis?.takeaways || []).join("；") || evidence.us_source.inferred_type}`
+    : "美国同类图证据不足，使用平台标准高转化结构。";
+  const brText = evidence.brazil_source
+    ? `巴西证据 ${evidence.brazil_source.unit_id}（${evidence.brazil_source.source_position || "位置未标注"}）：${(evidence.brazil_source.analysis?.takeaways || []).join("；") || evidence.brazil_source.inferred_type}`
+    : "巴西对应图片未采集到：本图直接按美国链接图片结构、版式和风格生成，只做必要葡语表达，不虚构巴西图片证据。";
+  const reviewText = Array.isArray(evidence.review_modifier) && evidence.review_modifier.length
+    ? `Review 修饰：${evidence.review_modifier.join("；")}。`
+    : "Review 修饰：只补充真实痛点、自然葡语和差评预防。";
+  return `图生图：上传产品图是唯一产品外观基准。${slot.objective}${usText}${brText}${reviewText}参考链接图片的结构、版式、风格、场景和信息层级，但不得改变上传产品图中的产品形状、颜色、包装、配件或可见细节；去除 logo、品牌名、商标、水印；只生成一张独立图片。`;
+}
+
+function buildFallbackImagePrompts(promptSlotEvidence = []) {
+  return promptSlotEvidence.map((evidence) => {
+    const slot = IMAGE_PROMPT_SLOTS.find((item) => item.sequence === evidence.sequence) || evidence;
+    return {
+      sequence: slot.sequence,
+      type: slot.type,
+      label: slot.label,
+      source_logic: evidence.us_source
+        ? `先用美国链接 ${evidence.us_source.unit_id}（${evidence.us_source.source_position || "位置未标注"}）提取 ${slot.us_focus}`
+        : `美国同类图不足，按 ${slot.us_focus} 的平台标准结构生成。`,
+      us_source_unit: evidence.us_source?.unit_id || null,
+      brazil_source_unit: evidence.brazil_source?.unit_id || null,
+      br_localization: evidence.brazil_source
+        ? `再用巴西链接 ${evidence.brazil_source.unit_id}（${evidence.brazil_source.source_position || "位置未标注"}）校准 ${slot.br_focus}`
+        : `巴西对应图片未采集到，直接按美国链接的图片结构、版式和风格生成；只保留必要葡语表达，不使用或虚构巴西图片证据。`,
+      review_modifier: evidence.review_modifier || [],
+      prompt: fallbackPromptForSlot(slot, evidence)
+    };
+  });
+}
+
+function normalizeSynthesisPromptSlots(result = {}, promptSlotEvidence = []) {
+  const bySequence = new Map();
+  const byType = new Map();
+  for (const item of Array.isArray(result.image_prompts) ? result.image_prompts : []) {
+    if (Number(item?.sequence)) bySequence.set(Number(item.sequence), item);
+    if (item?.type) byType.set(String(item.type), item);
+  }
+  const fallbackPrompts = buildFallbackImagePrompts(promptSlotEvidence);
+  const normalizedPrompts = promptSlotEvidence.map((evidence, index) => {
+    const slot = IMAGE_PROMPT_SLOTS[index] || evidence;
+    const fallback = fallbackPrompts[index] || {};
+    const modelItem = bySequence.get(slot.sequence) || byType.get(slot.type) || {};
+    return {
+      sequence: slot.sequence,
+      type: slot.type,
+      label: slot.label,
+      source_logic: cleanText(modelItem.source_logic || fallback.source_logic, 420),
+      us_source_unit: modelItem.us_source_unit || fallback.us_source_unit || evidence.us_source?.unit_id || null,
+      brazil_source_unit: modelItem.brazil_source_unit || fallback.brazil_source_unit || evidence.brazil_source?.unit_id || null,
+      br_localization: cleanText(modelItem.br_localization || fallback.br_localization, 320),
+      review_modifier: Array.isArray(modelItem.review_modifier)
+        ? modelItem.review_modifier.slice(0, 4)
+        : fallback.review_modifier || [],
+      prompt: cleanText(modelItem.prompt || fallback.prompt, 1200)
+    };
+  });
+  return {
+    ...result,
+    prompt_slot_evidence: promptSlotEvidence,
+    main_image_plan: normalizedPrompts.slice(0, 5).map((item) => item.type),
+    detail_page_plan: normalizedPrompts.slice(5).map((item) => item.type),
+    image_prompts: normalizedPrompts
+  };
+}
+
+function fallbackSegmentedResult(payload, analysisFlow, analysisMeta, imageUnits = [], reviewModifierAnalysis = null, promptSlotEvidence = null) {
   const product = compactProduct(payload.product || {});
   const manual = product.manual_keyword_overrides ? product.manual_keyword_overrides.split(/[,，\s]+/).filter(Boolean) : [];
   const auto = [
@@ -741,25 +1199,8 @@ function fallbackSegmentedResult(payload, analysisFlow, analysisMeta, imageUnits
     "prático",
     "resistente"
   ].filter(Boolean).slice(0, 8);
-  const imagePrompts = [
-    ["white_main", "白底主图", "白底、产品居中、无文字无水印，清晰展示产品本体。"],
-    ["lifestyle", "巴西场景图", "巴西家庭、办公室、出行或户外场景，突出真实使用。"],
-    ["infographic", "葡语卖点信息图", "用葡语短句表达 3-5 个强卖点，指向真实可见部位。"],
-    ["details_specs", "尺寸细节图", "展示材质、接口、容量、规格或包装内容，不虚构参数。"],
-    ["comparison", "优势对比图", "与普通方案对比优势，不出现竞品品牌或攻击性表达。"],
-    ["hero_banner", "详情页顶部视觉海报", "全宽 Hero 海报，产品和核心口号建立第一印象。"],
-    ["core_features", "详情页核心卖点", "大图加侧边文字或网格拆解 3-4 个核心卖点。"],
-    ["lifestyle_usage", "详情页生活方式", "真实使用场景建立代入感，突出产品调性与审美。"],
-    ["details_specs", "详情页细节技术说明", "微距细节、规格、使用方法和注意事项，降低退货率。"],
-    ["faq", "详情页 FAQ", "回答使用步骤、适用人群、材质或注意事项。"],
-    ["comparison_chart", "详情页产品线对比", "同品牌产品线表格对比，促进交叉销售。"]
-  ].map(([type, label, prompt]) => ({
-    type,
-    label,
-    source_logic: "没有可用链接证据时使用平台通用高转化结构。",
-    br_localization: "使用巴西葡语短句和本土日常场景。",
-    prompt: `图生图：上传产品图为基础产品输入，可参考/复刻竞品外观、包装、颜色和版式，但必须移除竞品 logo、品牌名、商标和水印。${prompt}`
-  }));
+  const promptEvidence = promptSlotEvidence || buildPromptSlotEvidence(imageUnits, analysisFlow || {}, reviewModifierAnalysis || fallbackReviewModifierAnalysis(buildReviewModifierEvidence(payload.link_scan_results || [])));
+  const imagePrompts = buildFallbackImagePrompts(promptEvidence);
 
   return {
     analysis_flow: analysisFlow,
@@ -773,12 +1214,13 @@ function fallbackSegmentedResult(payload, analysisFlow, analysisMeta, imageUnits
       stopped_by_budget: false,
       budget_ms: IMAGE_ANALYSIS_BUDGET_MS
     },
+    prompt_slot_evidence: promptEvidence,
     workflow_analysis: {
       us_main: "无美国链接证据，使用通用商品图结构。",
-      br_main: "无巴西链接证据，采用巴西葡语与日常场景本土化。",
+      br_main: "无巴西链接证据，直接按美国链接主图结构、版式和风格生成。",
       us_detail: "无美国详情页证据，使用标准 A+ 模块结构。",
-      br_detail: "无巴西详情页证据，采用本土语言、场景和信任表达。",
-      optimization_logic: "链接采集结果会被拆成单图分析任务：美国图给设计结构，巴西图给本土化落地；全程禁止竞品 logo、商标和品牌名。"
+      br_detail: "无巴西详情页证据，直接按美国详情页结构、版式和风格生成。",
+      optimization_logic: "链接采集结果会被拆成单图分析任务：美国图给设计结构；只有存在巴西图时才做本土化参考；全程禁止改变上传产品外观和使用竞品 logo、商标、品牌名。"
     },
     review_modifier_analysis: reviewModifierAnalysis || fallbackReviewModifierAnalysis(buildReviewModifierEvidence(payload.link_scan_results || [])),
     review_insights: reviewModifierAnalysis || fallbackReviewModifierAnalysis(buildReviewModifierEvidence(payload.link_scan_results || [])),
@@ -967,7 +1409,7 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
         apiKey,
         model,
         prompt: buildSingleImageAnalysisPrompt({ unit, product }),
-        maxTokens: 360,
+        maxTokens: 700,
         imageUrls: [unit.image_url]
       });
       settled.push([unit.id, value]);
@@ -981,7 +1423,7 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
           image_url: unit.image_url,
           image_role: unit.inferred_type,
           error: error.message,
-          prompt_takeaways: [
+          takeaways: [
             unit.market === "brazil" ? "使用巴西本土语言和场景做本地化参考。" : "使用美国链接图片作为设计结构和视觉风格参考。",
             unit.section === "detail" ? "参考详情页模块信息层级。" : "参考商品图构图和卖点表达。",
             "必须去除竞品 logo、品牌名、商标和水印。"
@@ -989,38 +1431,49 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
         },
         usage: null,
         reasoning_effort: process.env.OPENAI_REASONING_EFFORT || "high",
-        max_tokens: 360
+        max_tokens: 700
       };
       settled.push([unit.id, fallback]);
       return fallback.result;
     }
   };
 
-  for (const unit of imageUnits) {
-    if (Date.now() - analysisStartedAt > IMAGE_ANALYSIS_BUDGET_MS) {
-      stoppedByBudget = true;
-      settled.push([unit.id, {
-        result: {
-          unit_id: unit.id,
-          market: unit.market,
-          section: unit.section,
-          image_url: unit.image_url,
-          image_role: unit.inferred_type,
-          skipped: true,
-          reason: "image-analysis-budget-exceeded",
-          prompt_takeaways: [
-            unit.market === "brazil" ? "待分析：巴西本土化参考图。" : "待分析：美国设计结构参考图。",
-            "接口先返回已完成分析，避免浏览器/Nginx 长请求断开。"
-          ]
-        },
-        usage: null,
-        reasoning_effort: "skipped-budget",
-        max_tokens: 0
-      }]);
-      continue;
+  let nextUnitIndex = 0;
+  const markBudgetSkipped = (unit) => {
+    stoppedByBudget = true;
+    settled.push([unit.id, {
+      result: {
+        unit_id: unit.id,
+        market: unit.market,
+        section: unit.section,
+        image_url: unit.image_url,
+        image_role: unit.inferred_type,
+        skipped: true,
+        reason: "image-analysis-budget-exceeded",
+        takeaways: [
+          unit.market === "brazil" ? "待分析：巴西本土化参考图。" : "待分析：美国设计结构参考图。",
+          "接口先返回已完成分析，避免浏览器/Nginx 长请求断开。"
+        ]
+      },
+      usage: null,
+      reasoning_effort: "skipped-budget",
+      max_tokens: 0
+    }]);
+  };
+  const worker = async () => {
+    while (nextUnitIndex < imageUnits.length) {
+      const unit = imageUnits[nextUnitIndex];
+      nextUnitIndex += 1;
+      if (Date.now() - analysisStartedAt > IMAGE_ANALYSIS_BUDGET_MS) {
+        markBudgetSkipped(unit);
+        continue;
+      }
+      await runUnit(unit);
     }
-    await runUnit(unit);
-  }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(IMAGE_ANALYSIS_CONCURRENCY, Math.max(1, imageUnits.length)) }, () => worker())
+  );
 
   const analyses = Object.fromEntries(settled.map(([key, value]) => [key, value.result]));
   const analysisMeta = Object.fromEntries(settled.map(([key, value]) => [key, {
@@ -1055,25 +1508,27 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
   }
 
   if (!imageUnits.length) {
+    const promptSlotEvidence = buildPromptSlotEvidence(imageUnits, analyses, reviewModifierAnalysis);
     return {
-      result: fallbackSegmentedResult(payload, analyses, analysisMeta, imageUnits, reviewModifierAnalysis),
+      result: fallbackSegmentedResult(payload, analyses, analysisMeta, imageUnits, reviewModifierAnalysis, promptSlotEvidence),
       usage: {},
       reasoning_effort: "skipped-no-links",
       max_tokens: 0
     };
   }
 
+  const promptSlotEvidence = buildPromptSlotEvidence(imageUnits, analyses, reviewModifierAnalysis);
   let synthesis;
   try {
     synthesis = await runJsonTask({
       baseUrl,
       apiKey,
       model,
-      prompt: buildSynthesisPrompt(payload, analyses, imageUnits, reviewModifierAnalysis),
+      prompt: buildSynthesisPrompt(payload, analyses, imageUnits, reviewModifierAnalysis, promptSlotEvidence),
       maxTokens: Number(process.env.OPENAI_MAX_COMPLETION_TOKENS || DEFAULT_SYNTHESIS_MAX_TOKENS)
     });
   } catch (error) {
-    const fallback = fallbackSegmentedResult(payload, analyses, analysisMeta, imageUnits, reviewModifierAnalysis);
+    const fallback = fallbackSegmentedResult(payload, analyses, analysisMeta, imageUnits, reviewModifierAnalysis, promptSlotEvidence);
     fallback.workflow_analysis.optimization_logic = `模型综合阶段超时或失败，已保留 Bright Data 链接扫描证据并生成可编辑提示词草稿。失败原因：${cleanText(error.message, 180)}`;
     fallback.usage_note = "本次使用扫描证据降级生成，建议先人工检查最终提示词，再继续逐张生图。";
     return {
@@ -1093,6 +1548,7 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
       image_analysis_results: Object.values(analyses),
       review_modifier_analysis: reviewModifierAnalysis,
       review_modifier_meta: reviewModifierMeta,
+      prompt_slot_evidence: promptSlotEvidence,
       image_analysis_meta: {
         mode: "one-image-per-model-call",
         unit_count: imageUnits.length,
@@ -1100,7 +1556,7 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
         stopped_by_budget: stoppedByBudget,
         budget_ms: IMAGE_ANALYSIS_BUDGET_MS
       },
-      ...synthesis.result
+      ...normalizeSynthesisPromptSlots(synthesis.result, promptSlotEvidence)
     },
     usage: sumUsage([...settled.map(([, value]) => value.usage), reviewModifierMeta.usage, synthesis.usage]),
     reasoning_effort: synthesis.reasoning_effort,
@@ -1136,7 +1592,7 @@ async function fetchModelJson(url, options) {
 
 async function runGenerateWorkflow({ payload, token = "", requestId = `gen_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, onProgress = () => {} }) {
   const apiKey = process.env.OPENAI_API_KEY;
-  const baseUrl = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
+  const baseUrl = (process.env.OPENAI_BASE_URL || "http://154.40.59.124:3000/v1").replace(/\/$/, "");
   const model = process.env.OPENAI_TEXT_MODEL || "gpt-5.5";
   const startedAt = Date.now();
   let stage = "init";
@@ -1279,8 +1735,8 @@ function buildUserPrompt(payload) {
     "br_visual_deconstruction: 最多4条短句，记录本土语言、场景、信任要素、消费者关注点。",
     "localization_map: 最多4条短句，说明美国设计逻辑如何映射到巴西内容。",
     "keywords: {auto: 最多8个, manual: 用户人工词, final: 最多10个}。",
-    "final_prompt_strategy: 最多4条短句，强调上传图是图生图基础，允许参考/复刻竞品外观包装和颜色，但必须去品牌化。",
-    "image_prompts: 生成 6 条可编辑提示词，每条 50-80 字，覆盖主图、副图、场景图、信息图、详情页顶部、详情页模块。",
+    "final_prompt_strategy: 最多4条短句，强调上传图是唯一产品外观基准；链接只参考结构、版式、风格、场景和信息层级；不得改变产品形状、颜色、包装、配件或可见细节；必须去品牌化。",
+    "image_prompts: 必须按固定顺序生成 11 条可编辑图生图提示词：白底主图、巴西场景图、葡语卖点信息图、尺寸细节图、优势对比图、详情页 Hero、核心卖点、生活方式、细节技术说明、FAQ、产品线对比。",
     "detail_page: {title_pt_br, bullets_pt_br: 5条以内且每条20词以内, description_pt_br: 180字以内, faq_pt_br: 2条以内, platform_notes: 3条以内}。",
     "compliance_notes: 最多4条。",
     "usage_note: 一句话说明适合哪些平台。"

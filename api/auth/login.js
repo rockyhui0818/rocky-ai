@@ -23,6 +23,10 @@ module.exports = async function handler(req, res) {
       account: publicAccount(account)
     });
   } catch (error) {
-    return sendJson(res, 500, { error: error.code || "LOGIN_FAILED", message: error.message });
+    return sendJson(res, 500, {
+      error: error.code || "LOGIN_FAILED",
+      message: error.message,
+      details: error.details || null
+    });
   }
 };

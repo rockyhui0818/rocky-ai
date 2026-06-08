@@ -7,5 +7,8 @@
     "scanner": "node local-browser-scanner.js",
     "build": "node --check app.js && node --check server.js && node --check api/_lib/env.js && node --check api/health.js && node --check api/generate.js && node --check api/image.js"
   },
+  "dependencies": {
+    "@vercel/functions": "^3.6.2"
+  },
   "devDependencies": {}
 }

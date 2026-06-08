@@ -197,14 +197,14 @@ module.exports = async function handler(req, res) {
     return sendJson(res, 405, { error: "METHOD_NOT_ALLOWED" });
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  const baseUrl = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
+  const apiKey = process.env.OPENAI_IMAGE_API_KEY || process.env.OPENAI_API_KEY;
+  const baseUrl = (process.env.OPENAI_IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || "http://154.40.59.124:3000/v1").replace(/\/$/, "");
   const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
 
   if (!apiKey) {
     return sendJson(res, 500, {
-      error: "OPENAI_API_KEY_MISSING",
-      message: "Set OPENAI_API_KEY in your deployment environment."
+      error: "OPENAI_IMAGE_API_KEY_MISSING",
+      message: "Set OPENAI_IMAGE_API_KEY or OPENAI_API_KEY in your deployment environment."
     });
   }
 
@@ -242,7 +242,9 @@ module.exports = async function handler(req, res) {
         String(item.prompt || prompt),
         "",
         "Critical product consistency rules:",
-        "Use the uploaded product reference as the base product input, but you may adapt the final product styling, package form, color palette, layout, and visual presentation to match the competitor/reference creative direction requested in the prompt.",
+        "The uploaded product reference is the only source of truth for product appearance.",
+        "Do not change the product shape, color, package form, accessories, proportions, materials, labels, visible details, or included parts from the uploaded reference.",
+        "Competitor/reference links may influence only layout, composition, scene, background, lighting style, information hierarchy, text treatment, and overall creative direction.",
         "Never include competitor brand names, logos, trademarks, watermarks, platform logos, or recognizable branded IP. Replace any brand marks with blank/generic unbranded areas.",
         "Generate one standalone marketplace image only, not a collage."
       ].join("\n");

@@ -2,6 +2,13 @@ const { getBearerToken, handleOptions, readJson, sendJson } = require("./_lib/ht
 const { createJob, publicJob, updateJob } = require("./_lib/jobs");
 const { runGenerateWorkflow } = require("./generate");
 
+let waitUntil = null;
+try {
+  ({ waitUntil } = require("@vercel/functions"));
+} catch {
+  waitUntil = null;
+}
+
 module.exports = async function handler(req, res) {
   if (handleOptions(req, res)) return;
   if (req.method !== "POST") {
@@ -11,16 +18,16 @@ module.exports = async function handler(req, res) {
 
   const payload = await readJson(req);
   const token = getBearerToken(req);
-  const job = createJob({
+  const job = await createJob({
     status: "queued",
     stage: "queued",
     progress: 3,
     message: "任务已创建，后台开始扫描链接。"
   });
 
-  setImmediate(async () => {
+  const runJob = async () => {
     try {
-      updateJob(job.id, {
+      await updateJob(job.id, {
         status: "running",
         stage: "started",
         progress: 5,
@@ -32,7 +39,7 @@ module.exports = async function handler(req, res) {
         requestId: job.id.replace(/^job_/, "gen_"),
         onProgress: (progress) => updateJob(job.id, progress)
       });
-      updateJob(job.id, {
+      await updateJob(job.id, {
         status: "success",
         stage: "complete",
         progress: 100,
@@ -40,7 +47,7 @@ module.exports = async function handler(req, res) {
         result
       });
     } catch (error) {
-      updateJob(job.id, {
+      await updateJob(job.id, {
         status: "error",
         stage: "failed",
         progress: 100,
@@ -56,7 +63,20 @@ module.exports = async function handler(req, res) {
         }
       });
     }
-  });
+  };
+
+  const jobPromise = runJob();
+  if (typeof waitUntil === "function") {
+    waitUntil(jobPromise);
+  } else {
+    jobPromise.catch((error) => {
+      console.error(JSON.stringify({
+        event: "generate_job_unhandled_error",
+        job_id: job.id,
+        message: error.message
+      }));
+    });
+  }
 
   return sendJson(res, 202, {
     ok: true,
