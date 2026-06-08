@@ -22,6 +22,7 @@ module.exports = async function handler(req, res) {
     ok: true,
     service: "vision-brzazil-commerce-studio",
     api: "online",
+    commit: process.env.VERCEL_GIT_COMMIT_SHA || "",
     diagnostics: {
       supabase: {
         configured: configured(process.env.SUPABASE_URL) && configured(process.env.SUPABASE_SERVICE_ROLE_KEY),

@@ -639,7 +639,7 @@ async function scanProductLink(url, marketHint) {
 }
 
 async function scanProductLinks(payload) {
-  if (Array.isArray(payload?.link_scan_results) && payload.link_scan_results.length) {
+  if (!process.env.BRIGHTDATA_API_KEY && Array.isArray(payload?.link_scan_results) && payload.link_scan_results.length) {
     return payload.link_scan_results.map(compactScanResult);
   }
   const urls = Array.isArray(payload?.product?.source_urls) ? payload.product.source_urls.filter(Boolean).slice(0, MAX_SCAN_LINKS) : [];
@@ -1641,7 +1641,7 @@ async function runGenerateWorkflow({ payload, token = "", requestId = `gen_${Dat
   }
 
   stage = "link_scan";
-  onProgress({ status: "running", stage, progress: 15, message: "正在通过 Bright Data 扫描主图、详情页图片和 review..." });
+  onProgress({ status: "running", stage, progress: 15, message: process.env.BRIGHTDATA_API_KEY ? "正在强制通过 Bright Data 扫描主图、详情页图片和 review..." : "正在扫描主图、详情页图片和 review..." });
   logGenerate("generate_start", {
     source_url_count: Array.isArray(payload?.product?.source_urls) ? payload.product.source_urls.length : 0,
     platform: payload?.platform_key || payload?.platform || ""

@@ -33,7 +33,8 @@ async function run() {
     OPENAI_IMAGE_CONCURRENCY: process.env.OPENAI_IMAGE_CONCURRENCY,
     BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY,
     BRIGHTDATA_ZONE: process.env.BRIGHTDATA_ZONE,
-    BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS
+    BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS,
+    VERCEL_GIT_COMMIT_SHA: process.env.VERCEL_GIT_COMMIT_SHA
   };
 
   process.env.SUPABASE_URL = "https://example.supabase.co";
@@ -48,6 +49,7 @@ async function run() {
   process.env.BRIGHTDATA_API_KEY = "brd-test";
   process.env.BRIGHTDATA_ZONE = "web_unlocker1";
   process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "20000";
+  process.env.VERCEL_GIT_COMMIT_SHA = "abc123";
 
   delete require.cache[require.resolve(path.join(root, "api/health.js"))];
   const handler = require(path.join(root, "api/health.js"));
@@ -61,6 +63,7 @@ async function run() {
 
   assert.strictEqual(res.statusCode, 200);
   const payload = JSON.parse(res.body);
+  assert.strictEqual(payload.commit, "abc123");
   assert.strictEqual(payload.diagnostics.supabase.configured, true);
   assert.strictEqual(payload.diagnostics.text_model.model, "gpt-5.5");
   assert.strictEqual(payload.diagnostics.image_model.model, "gpt-image-2-pro");
