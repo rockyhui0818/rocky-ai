@@ -18,12 +18,21 @@ module.exports = async function handler(req, res) {
 
   const payload = await readJson(req);
   const token = getBearerToken(req);
-  const job = await createJob({
-    status: "queued",
-    stage: "queued",
-    progress: 3,
-    message: "任务已创建，后台开始扫描链接。"
-  });
+  let job;
+  try {
+    job = await createJob({
+      status: "queued",
+      stage: "queued",
+      progress: 3,
+      message: "任务已创建，后台开始扫描链接。"
+    });
+  } catch (error) {
+    return sendJson(res, error.statusCode || 500, {
+      error: error.code || "GENERATE_JOB_CREATE_FAILED",
+      message: error.message || "后台任务创建失败。",
+      details: error.details || null
+    });
+  }
 
   const runJob = async () => {
     try {

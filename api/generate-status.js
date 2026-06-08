@@ -10,7 +10,17 @@ module.exports = async function handler(req, res) {
 
   const url = new URL(req.url, "http://localhost");
   const id = url.searchParams.get("id") || "";
-  const job = await getJob(id);
+  let job;
+  try {
+    job = await getJob(id);
+  } catch (error) {
+    return sendJson(res, error.statusCode || 500, {
+      error: error.code || "GENERATE_JOB_STATUS_FAILED",
+      message: error.message || "读取后台任务状态失败。",
+      details: error.details || null
+    });
+  }
+
   if (!job) {
     return sendJson(res, 404, {
       error: "JOB_NOT_FOUND",

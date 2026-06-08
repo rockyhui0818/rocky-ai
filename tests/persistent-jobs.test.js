@@ -10,6 +10,27 @@ const generateStatusSource = fs.readFileSync(path.join(root, "api/generate-statu
 const vercelConfig = JSON.parse(fs.readFileSync(path.join(root, "vercel.json"), "utf8"));
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
+function clearApiModule(relativePath) {
+  delete require.cache[require.resolve(path.join(root, relativePath))];
+}
+
+function createMockResponse() {
+  return {
+    statusCode: 200,
+    headers: {},
+    body: "",
+    setHeader(name, value) {
+      this.headers[name.toLowerCase()] = value;
+    },
+    getHeader(name) {
+      return this.headers[name.toLowerCase()];
+    },
+    end(payload = "") {
+      this.body = payload;
+    }
+  };
+}
+
 assert(
   /create table if not exists public\.generate_jobs/i.test(schema),
   "Supabase schema must include a persistent generate_jobs table."
@@ -34,7 +55,7 @@ assert(
 );
 
 assert(
-  /const job = await createJob/.test(generateJobSource),
+  /(?:const|let|var)?\s*job\s*=\s*await createJob/.test(generateJobSource),
   "generate-job handler must await persistent job creation before returning the id."
 );
 
@@ -44,7 +65,7 @@ assert(
 );
 
 assert(
-  /const job = await getJob/.test(generateStatusSource),
+  /(?:const|let|var)?\s*job\s*=\s*await getJob/.test(generateStatusSource),
   "generate-status handler must await persistent job lookup."
 );
 
@@ -58,4 +79,84 @@ assert(
   "package.json must include @vercel/functions for waitUntil support on Vercel."
 );
 
-console.log("persistent jobs ok");
+async function rejectsMemoryOnlyJobsOnVercel() {
+  const previousVercel = process.env.VERCEL;
+  process.env.VERCEL = "1";
+  clearApiModule("api/_lib/supabase.js");
+  clearApiModule("api/_lib/jobs.js");
+  clearApiModule("api/generate-job.js");
+
+  const supabaseModule = require(path.join(root, "api/_lib/supabase.js"));
+  supabaseModule.supabaseRequest = async () => {
+    const error = new Error("relation public.generate_jobs does not exist");
+    error.code = "SUPABASE_REQUEST_FAILED";
+    error.statusCode = 404;
+    error.details = { code: "PGRST205" };
+    throw error;
+  };
+
+  const handler = require(path.join(root, "api/generate-job.js"));
+  const req = {
+    method: "POST",
+    headers: {},
+    [Symbol.asyncIterator]: async function* emptyBody() {}
+  };
+  const res = createMockResponse();
+  await handler(req, res);
+
+  if (previousVercel === undefined) {
+    delete process.env.VERCEL;
+  } else {
+    process.env.VERCEL = previousVercel;
+  }
+
+  assert.strictEqual(res.statusCode, 503, "Vercel must reject job creation when durable storage is unavailable.");
+  const payload = JSON.parse(res.body);
+  assert.strictEqual(payload.error, "GENERATE_JOB_STORAGE_UNAVAILABLE");
+  assert(!payload.job, "Response must not return a memory-only job id that status polling cannot find.");
+}
+
+async function reportsStorageFailureDuringStatusPolling() {
+  const previousVercel = process.env.VERCEL;
+  process.env.VERCEL = "1";
+  clearApiModule("api/_lib/supabase.js");
+  clearApiModule("api/_lib/jobs.js");
+  clearApiModule("api/generate-status.js");
+
+  const supabaseModule = require(path.join(root, "api/_lib/supabase.js"));
+  supabaseModule.supabaseRequest = async () => {
+    const error = new Error("relation public.generate_jobs does not exist");
+    error.code = "SUPABASE_REQUEST_FAILED";
+    error.statusCode = 404;
+    error.details = { code: "PGRST205" };
+    throw error;
+  };
+
+  const handler = require(path.join(root, "api/generate-status.js"));
+  const req = {
+    method: "GET",
+    url: "/api/generate-status?id=job_missing_table",
+    headers: {}
+  };
+  const res = createMockResponse();
+  await handler(req, res);
+
+  if (previousVercel === undefined) {
+    delete process.env.VERCEL;
+  } else {
+    process.env.VERCEL = previousVercel;
+  }
+
+  assert.strictEqual(res.statusCode, 503, "Vercel status polling must expose durable storage failures.");
+  const payload = JSON.parse(res.body);
+  assert.strictEqual(payload.error, "GENERATE_JOB_STORAGE_UNAVAILABLE");
+  assert.strictEqual(payload.details?.action, "get");
+}
+
+rejectsMemoryOnlyJobsOnVercel()
+  .then(reportsStorageFailureDuringStatusPolling)
+  .then(() => console.log("persistent jobs ok"))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

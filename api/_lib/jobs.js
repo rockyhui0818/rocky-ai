@@ -3,6 +3,25 @@ const { supabaseRequest } = require("./supabase");
 const memoryJobs = new Map();
 const JOB_TTL_MS = 45 * 60 * 1000;
 
+function requiresDurableJobs() {
+  return process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
+}
+
+function createStorageError(action, error) {
+  const storageError = new Error("生成任务持久化存储不可用，请检查 Supabase generate_jobs 表和环境变量。");
+  storageError.code = "GENERATE_JOB_STORAGE_UNAVAILABLE";
+  storageError.statusCode = 503;
+  storageError.details = {
+    action,
+    cause_code: error.code || "",
+    cause_status_code: error.statusCode || null,
+    cause_message: error.message,
+    cause_details: error.details || null,
+    hint: "Run supabase/schema.sql so public.generate_jobs exists, then verify SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Vercel."
+  };
+  return storageError;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -59,6 +78,7 @@ async function createJob(initial = {}) {
       message: error.message,
       code: error.code || ""
     }));
+    if (requiresDurableJobs()) throw createStorageError("create", error);
     return rememberJob(job);
   }
 }
@@ -78,6 +98,7 @@ async function getJob(id) {
       message: error.message,
       code: error.code || ""
     }));
+    if (requiresDurableJobs()) throw createStorageError("get", error);
     return memoryJobs.get(id) || null;
   }
 }
@@ -113,6 +134,7 @@ async function updateJob(id, patch = {}) {
       message: error.message,
       code: error.code || ""
     }));
+    if (requiresDurableJobs()) throw createStorageError("update", error);
     return rememberJob(next);
   }
 }
