@@ -4,6 +4,7 @@ const { filter, supabaseRequest } = require("./_lib/supabase");
 
 const MAX_REFERENCE_IMAGES = 6;
 const MAX_REFERENCE_BYTES = 1400000;
+const PROVIDER_TIMEOUT_MS = Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 55000);
 
 function firstImage(data) {
   const item = data?.data?.[0] || {};
@@ -92,6 +93,43 @@ function isRetryableProviderError(error) {
   );
 }
 
+function providerHost(baseUrl) {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return "invalid-provider-url";
+  }
+}
+
+async function fetchProvider(baseUrl, endpoint, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+  try {
+    return await fetch(`${baseUrl}${endpoint}`, {
+      ...options,
+      signal: controller.signal
+    });
+  } catch (error) {
+    const message = error?.name === "AbortError"
+      ? `Image provider request timed out after ${PROVIDER_TIMEOUT_MS}ms.`
+      : `Image provider network request failed: ${error.message || String(error)}`;
+    const providerError = new Error(message);
+    providerError.statusCode = 502;
+    providerError.details = {
+      error: "IMAGE_PROVIDER_NETWORK_FAILED",
+      endpoint,
+      provider_host: providerHost(baseUrl),
+      provider_model_hint: "Check OPENAI_IMAGE_BASE_URL, OPENAI_IMAGE_API_KEY, OPENAI_IMAGE_MODEL, and provider network reachability.",
+      cause_name: error?.name || "",
+      cause_message: error?.message || String(error || ""),
+      timeout_ms: PROVIDER_TIMEOUT_MS
+    };
+    throw providerError;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function appendReferenceImages(form, blobs) {
   blobs.forEach((blob, index) => {
     form.append("image", blob, `product-reference-${index + 1}.jpg`);
@@ -111,7 +149,7 @@ async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceIma
     form.append("size", size);
     form.append("response_format", "b64_json");
     appendReferenceImages(form, referenceBlobs);
-    const editResponse = await fetch(`${baseUrl}/images/edits`, {
+    const editResponse = await fetchProvider(baseUrl, "/images/edits", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` },
       body: form
@@ -128,7 +166,7 @@ async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceIma
       singleForm.append("size", size);
       singleForm.append("response_format", "b64_json");
       appendReferenceImages(singleForm, referenceBlobs.slice(0, 1));
-      const singleResponse = await fetch(`${baseUrl}/images/edits`, {
+      const singleResponse = await fetchProvider(baseUrl, "/images/edits", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
         body: singleForm
@@ -158,7 +196,7 @@ async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceIma
     }
   }
 
-  const response = await fetch(`${baseUrl}/images/generations`, {
+  const response = await fetchProvider(baseUrl, "/images/generations", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,

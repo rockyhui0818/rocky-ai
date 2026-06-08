@@ -434,8 +434,8 @@ function createStaticApiError(path) {
 function createNetworkApiError(path, error) {
   const apiBase = getConfiguredApiBase();
   const message = apiBase
-    ? `无法连接后端 API：${apiBase}${path}。链接扫描和模型拆解没有执行，请检查 Render 服务是否已部署成功、环境变量是否完整、服务是否处于运行状态。`
-    : `无法连接后端 API：${path}。`;
+    ? `无法连接后端 API：${apiBase}${path}。请检查后端服务是否已部署成功、环境变量是否完整、服务是否处于运行状态。`
+    : `无法连接后端 API：${path}。请检查 Vercel 后端函数是否可访问，以及上游模型接口是否超时。`;
   const wrapped = new Error(message);
   wrapped.status = 0;
   wrapped.payload = {
