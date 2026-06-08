@@ -46,7 +46,7 @@ async function run() {
 
   process.env.OPENAI_IMAGE_API_KEY = "sk-test";
   process.env.OPENAI_IMAGE_BASE_URL = "http://provider.example/v1";
-  process.env.OPENAI_IMAGE_MODEL = "gpt-image-2";
+  process.env.OPENAI_IMAGE_MODEL = "gpt-image-2-pro";
   global.fetch = async () => {
     throw new TypeError("fetch failed");
   };
@@ -70,8 +70,8 @@ async function run() {
   assert.strictEqual(payload.details.failures[0].details.endpoint, "/images/generations");
 
   process.env.OPENAI_IMAGE_API_KEY = "sk-test";
-  process.env.OPENAI_IMAGE_BASE_URL = "http://154.40.59.124:3000/v1";
-  process.env.OPENAI_IMAGE_MODEL = "gpt-image-2";
+  process.env.OPENAI_IMAGE_BASE_URL = "http://154.64.230.35:3000/v1";
+  process.env.OPENAI_IMAGE_MODEL = "gpt-image-2-pro";
   const requested = [];
   global.fetch = async (url, options = {}) => {
     requested.push({

@@ -1592,7 +1592,7 @@ async function fetchModelJson(url, options) {
 
 async function runGenerateWorkflow({ payload, token = "", requestId = `gen_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, onProgress = () => {} }) {
   const apiKey = process.env.OPENAI_API_KEY;
-  const baseUrl = (process.env.OPENAI_BASE_URL || "http://154.40.59.124:3000/v1").replace(/\/$/, "");
+  const baseUrl = (process.env.OPENAI_BASE_URL || "http://154.64.230.35:3000/v1").replace(/\/$/, "");
   const model = process.env.OPENAI_TEXT_MODEL || "gpt-5.5";
   const startedAt = Date.now();
   let stage = "init";

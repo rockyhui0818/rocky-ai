@@ -6,7 +6,6 @@ const MAX_REFERENCE_IMAGES = 6;
 const MAX_REFERENCE_BYTES = 1400000;
 const PROVIDER_TIMEOUT_MS = Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 90000);
 const VERIFIED_IMAGE_BASE_URL = "http://154.64.230.35:3000/v1";
-const LEGACY_IMAGE_BASE_URL = "http://154.40.59.124:3000/v1";
 
 function firstImage(data) {
   const item = data?.data?.[0] || {};
@@ -104,15 +103,12 @@ function providerHost(baseUrl) {
 }
 
 function normalizeImageBaseUrl(value) {
-  const baseUrl = String(value || VERIFIED_IMAGE_BASE_URL).replace(/\/$/, "");
-  return baseUrl === LEGACY_IMAGE_BASE_URL ? VERIFIED_IMAGE_BASE_URL : baseUrl;
+  return String(value || VERIFIED_IMAGE_BASE_URL).replace(/\/$/, "");
 }
 
-function normalizeImageModel(model, baseUrl) {
+function normalizeImageModel(model) {
   const candidate = String(model || "").trim();
-  if (!candidate) return "gpt-image-2-pro";
-  if (baseUrl === VERIFIED_IMAGE_BASE_URL && candidate === "gpt-image-2") return "gpt-image-2-pro";
-  return candidate;
+  return candidate || "gpt-image-2-pro";
 }
 
 function publicProviderConfig(baseUrl, model) {

@@ -2153,7 +2153,7 @@ async function requestRemoteImage(pack) {
   const images = [];
   const failures = [];
   const modes = new Set();
-  let model = "gpt-image-2";
+  let model = "gpt-image-2-pro";
   let size = selectedSizeProfile.apiSize || "1024x1024";
   let account = null;
 
@@ -2635,7 +2635,7 @@ els.generateBtn.addEventListener("click", async () => {
     try {
       const imageData = await requestRemoteImage(confirmedPack);
       state.latestImageResult = imageData;
-      state.latestImageStatus = `图片队列完成：成功 ${imageData.images?.length || 0} 张，失败 ${imageData.failures?.length || 0} 张，模型：${imageData.model || "gpt-image-2"}`;
+      state.latestImageStatus = `图片队列完成：成功 ${imageData.images?.length || 0} 张，失败 ${imageData.failures?.length || 0} 张，模型：${imageData.model || "gpt-image-2-pro"}`;
       state.pendingImagePack = null;
       recordAuditEvent("generate", "根据已确认提示词生成图片", confirmedPack);
     } catch (error) {
