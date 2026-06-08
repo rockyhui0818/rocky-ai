@@ -2168,13 +2168,19 @@ async function requestRemoteImage(pack) {
     renderOutputs();
 
     try {
-      const data = await apiRequest("/api/image", {
-      method: "POST",
-      body: JSON.stringify({
-        ...basePayload,
-        prompts: [item]
-      })
+      const jobResponse = await apiRequest("/api/image-job", {
+        method: "POST",
+        body: JSON.stringify({
+          ...basePayload,
+          prompts: [item]
+        })
       });
+      state.imageJobs[index] = {
+        ...state.imageJobs[index],
+        message: "后台图片任务已创建，正在轮询结果..."
+      };
+      renderOutputs();
+      const data = await pollGenerateJob(jobResponse.job?.id);
       const itemImages = data.images || (data.image ? [data.image] : []);
       const firstImage = itemImages[0] ? {
         ...itemImages[0],

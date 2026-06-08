@@ -11,6 +11,9 @@
     },
     "api/image.js": {
       "maxDuration": 120
+    },
+    "api/image-job.js": {
+      "maxDuration": 300
     }
   },
   "headers": [

@@ -11,6 +11,7 @@ const handlers = {
   "/api/generate-job": require("./api/generate-job"),
   "/api/generate-status": require("./api/generate-status"),
   "/api/image": require("./api/image"),
+  "/api/image-job": require("./api/image-job"),
   "/api/usage": require("./api/usage"),
   "/api/auth/login": require("./api/auth/login"),
   "/api/auth/session": require("./api/auth/session"),
