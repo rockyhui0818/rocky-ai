@@ -1620,6 +1620,7 @@ function renderScanEvidenceItem(scan) {
       ? `只采集主图 ${scope.main_image_count || 0} 张、详情页图片 ${scope.detail_page_image_count || 0} 张、Review 信息；已屏蔽导航/广告/菜单/页脚/整页正文。`
     : "";
   const reviewBits = [
+    scan.platform_name || scope.platform_name ? `平台识别：${scan.platform_name || scope.platform_name}` : "",
     reviews.rating ? `评分 ${reviews.rating}` : "",
     reviews.review_count ? `${reviews.review_count} 条评价` : "",
     Array.isArray(reviews.positive_terms) && reviews.positive_terms.length ? `好评词：${reviews.positive_terms.slice(0, 4).map((item) => item.term).join(" / ")}` : "",

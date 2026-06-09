@@ -39,6 +39,58 @@ const DETAIL_MODULE_TYPES = [
   "faq",
   "comparison_chart"
 ];
+const PLATFORM_SCAN_CONFIGS = [
+  {
+    key: "amazon",
+    name: "Amazon",
+    host_patterns: [/amazon\./i],
+    html_patterns: [/data-a-dynamic-image/i, /colorImages\s*:\s*\{\s*initial\s*:/i],
+    main_markers: ["landingImage", "imageBlock", "altImages", "imageBlock_feature_div"],
+    detail_markers: ["aplus", "a-plus", "dpx-aplus", "productDescription", "product-description", "detail-bullets", "feature-bullets"],
+    detail_required: /aplus|a-plus|productdescription|product-description|from the manufacturer|product details/i,
+    detail_exclude: /sp_detail|sponsored|recommend|also-bought|similarities|desktop-dp-sims|purchase-sims/i
+  },
+  {
+    key: "mercado_livre",
+    name: "Mercado Livre",
+    host_patterns: [/mercadolivre\.com/i, /mercadolibre\./i],
+    html_patterns: [/ui-pdp-gallery/i, /ui-pdp-description/i],
+    main_markers: ["ui-pdp-gallery", "ui-pdp-image", "ui-pdp-photos"],
+    detail_markers: ["ui-pdp-description", "ui-pdp-specs", "ui-pdp-features"],
+    detail_required: /ui-pdp-description|ui-pdp-specs|ui-pdp-features/i,
+    detail_exclude: /recommend|recomend|sponsored|publicidad|advertising|also-bought/i
+  },
+  {
+    key: "shopee",
+    name: "Shopee",
+    host_patterns: [/shopee\./i],
+    html_patterns: [/product-briefing/i, /product-detail/i],
+    main_markers: ["product-briefing", "product-image", "product-variation"],
+    detail_markers: ["product-detail", "product-description", "shop-product-detail"],
+    detail_required: /product-detail|product-description|shop-product-detail/i,
+    detail_exclude: /recommend|recommendation|similar|sponsored|ads|also-like/i
+  },
+  {
+    key: "shopify",
+    name: "Shopify / independent store",
+    host_patterns: [/\/products\//i],
+    html_patterns: [/cdn\.shopify\.com/i, /product__media-gallery/i, /product-media-gallery/i],
+    main_markers: ["product__media-gallery", "product-media-gallery", "product-gallery", "product__media", "product-single__media"],
+    detail_markers: ["product-description", "product__description", "rte", "product-tabs", "product-details"],
+    detail_required: /product-description|product__description|product-tabs|product-details|rte/i,
+    detail_exclude: /related-products|recommend|upsell|cross-sell|recently-viewed|sponsored/i
+  },
+  {
+    key: "generic",
+    name: "Generic ecommerce",
+    host_patterns: [],
+    html_patterns: [],
+    main_markers: ["product-gallery", "product-images", "gallery", "media-gallery", "carousel"],
+    detail_markers: ["product-description", "description", "product-detail", "details", "features"],
+    detail_required: /product-description|product-detail|description|details|features/i,
+    detail_exclude: /related|recommend|upsell|cross-sell|sponsored|ads|footer|nav/i
+  }
+];
 const IMAGE_PROMPT_SLOTS = [
   {
     sequence: 1,
@@ -358,6 +410,18 @@ function extractImageUrlsFromHtml(fragment = "") {
   return urls.map(cleanImageUrl).filter(Boolean);
 }
 
+function detectPlatform(url = "", html = "") {
+  const source = `${url}\n${html.slice(0, 20000)}`;
+  const specific = PLATFORM_SCAN_CONFIGS.find((config) =>
+    config.key !== "generic" &&
+    (
+      (config.host_patterns || []).some((pattern) => pattern.test(source)) ||
+      (config.html_patterns || []).some((pattern) => pattern.test(source))
+    )
+  );
+  return specific || PLATFORM_SCAN_CONFIGS.find((config) => config.key === "generic");
+}
+
 function extractHtmlSections(html, markers = []) {
   const sections = [];
   const lower = html.toLowerCase();
@@ -380,14 +444,38 @@ function extractHtmlSections(html, markers = []) {
     .map((item) => item.section);
 }
 
-function isUsefulDetailSection(marker = "", section = "") {
-  const markerText = String(marker || "").toLowerCase();
-  const sectionText = String(section || "").toLowerCase();
-  if (/sp_detail|sponsored|recommend|also-bought|similarities|desktop-dp-sims|purchase-sims/.test(sectionText)) return false;
-  if (/aplus|a-plus|dpx-aplus|productdescription|product-description/.test(markerText)) return true;
-  if (/detail-bullets|feature-bullets/.test(markerText)) {
-    return /aplus|a-plus|productdescription|product-description|from the manufacturer|product details/i.test(section);
+function extractTaggedHtmlSections(html = "", markers = []) {
+  const sections = [];
+  for (const marker of markers) {
+    const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const patterns = [
+      new RegExp(`<([a-z][\\w:-]*)\\b[^>]*(?:id|class|data-testid|aria-label)=["'][^"']*${escaped}[^"']*["'][^>]*>[\\s\\S]*?<\\/\\1>`, "gi"),
+      new RegExp(`<([a-z][\\w:-]*)\\b[^>]*${escaped}[^>]*>[\\s\\S]*?<\\/\\1>`, "gi")
+    ];
+    for (const pattern of patterns) {
+      let match;
+      while ((match = pattern.exec(html)) && sections.length < 80) {
+        sections.push(match[0]);
+      }
+    }
   }
+  return sections;
+}
+
+function platformSections(html = "", markers = []) {
+  const tagged = extractTaggedHtmlSections(html, markers);
+  if (tagged.length) return tagged;
+  return extractHtmlSections(html, markers);
+}
+
+function isExcludedProductSection(section = "", platform = detectPlatform()) {
+  const sectionText = String(section || "").toLowerCase();
+  return Boolean((platform.detail_exclude || /recommend|sponsored|related/i).test(sectionText));
+}
+
+function isUsefulDetailSection(marker = "", section = "", platform = detectPlatform()) {
+  if (isExcludedProductSection(section, platform)) return false;
+  if ((platform.detail_required || /product|description|detail|aplus/i).test(`${marker}\n${section}`)) return true;
   return false;
 }
 
@@ -413,15 +501,15 @@ function enrichImageCandidate(candidate, { area, index, role, sourceMarker, conf
 
 function extractImageCandidates(html, baseUrl) {
   const candidates = [];
+  const platform = detectPlatform(baseUrl, html);
   const ogImage = extractMeta(html, "og:image");
-  if (ogImage && !isNonProductImage(ogImage)) {
+  if (platform.key === "amazon" && ogImage && !isNonProductImage(ogImage)) {
     candidates.push(enrichImageCandidate(
       { type: "main-image", src: absolutizeUrl(ogImage, baseUrl), alt: "Open Graph product image", score: 12 },
       { area: "main", index: 1, role: "white_main", sourceMarker: "og:image", confidence: "medium" }
     ));
   }
 
-  const dynamicImageBlocks = Array.from(html.matchAll(/data-a-dynamic-image=(["'])([\s\S]*?)\1/gi));
   let galleryIndex = 0;
   const addMainGalleryImage = (src, sourceMarker = "product-gallery", confidence = "high") => {
     if (!src || isNonProductImage(src)) return;
@@ -431,42 +519,55 @@ function extractImageCandidates(html, baseUrl) {
       {
         type: "main-image",
         src: absolutizeUrl(src, baseUrl),
-        alt: galleryIndex === 1 ? "Amazon product gallery hero/main image" : `Amazon product gallery image ${galleryIndex}`,
+        alt: galleryIndex === 1 ? `${platform.name} product gallery hero/main image` : `${platform.name} product gallery image ${galleryIndex}`,
         score: galleryIndex === 1 ? 14 : 12
       },
       { area: "main", index: galleryIndex, role, sourceMarker, confidence }
     ));
   };
-  for (const block of dynamicImageBlocks.slice(0, 12)) {
-    const urls = extractDynamicImageUrls(block[2]);
-    for (const src of urls.slice(0, MAX_RAW_MAIN_IMAGE_CANDIDATES)) {
-      addMainGalleryImage(src, "data-a-dynamic-image", "high");
+
+  if (platform.key === "amazon") {
+    const dynamicImageBlocks = Array.from(html.matchAll(/data-a-dynamic-image=(["'])([\s\S]*?)\1/gi));
+    for (const block of dynamicImageBlocks.slice(0, 12)) {
+      const urls = extractDynamicImageUrls(block[2]);
+      for (const src of urls.slice(0, MAX_RAW_MAIN_IMAGE_CANDIDATES)) {
+        addMainGalleryImage(src, "data-a-dynamic-image", "high");
+      }
+    }
+    for (const src of extractAmazonCarouselGalleryUrls(html).slice(0, MAX_RAW_MAIN_IMAGE_CANDIDATES)) {
+      const cleanSrc = cleanImageUrl(src);
+      const key = imageDedupeKey(cleanSrc);
+      if (!cleanSrc || candidates.some((item) => item.dedupe_key === key)) continue;
+      addMainGalleryImage(cleanSrc, "colorImages.initial", "high");
+    }
+  } else {
+    const mainSections = (platform.main_markers || []).flatMap((marker) =>
+      platformSections(html, [marker]).map((section) => ({ marker, section }))
+    ).filter(({ section }) => !isExcludedProductSection(section, platform));
+    for (const { marker, section } of mainSections) {
+      const urls = extractImageUrlsFromHtml(section)
+        .map((src) => cleanImageUrl(src))
+        .filter((src) => src && !isNonProductImage(src));
+      let addedFromSection = 0;
+      for (const src of urls) {
+        addMainGalleryImage(src, marker, "high");
+        addedFromSection += 1;
+        if (addedFromSection >= MAX_RAW_MAIN_IMAGE_CANDIDATES) break;
+      }
+    }
+    if (!galleryIndex && ogImage && !isNonProductImage(ogImage)) {
+      addMainGalleryImage(ogImage, "og:image", "low");
     }
   }
-  for (const src of extractAmazonCarouselGalleryUrls(html).slice(0, MAX_RAW_MAIN_IMAGE_CANDIDATES)) {
-    const cleanSrc = cleanImageUrl(src);
-    const key = imageDedupeKey(cleanSrc);
-    if (!cleanSrc || candidates.some((item) => item.dedupe_key === key)) continue;
-    addMainGalleryImage(cleanSrc, "colorImages.initial", "high");
-  }
 
-  const detailMarkers = [
-    "aplus",
-    "a-plus",
-    "dpx-aplus",
-    "productDescription",
-    "product-description",
-    "detail-bullets",
-    "feature-bullets"
-  ];
-  const detailSections = detailMarkers.flatMap((marker) =>
-    extractHtmlSections(html, [marker]).map((section) => ({ marker, section }))
-  ).filter(({ marker, section }) => isUsefulDetailSection(marker, section));
+  const detailSections = (platform.detail_markers || []).flatMap((marker) =>
+    platformSections(html, [marker]).map((section) => ({ marker, section }))
+  ).filter(({ marker, section }) => isUsefulDetailSection(marker, section, platform));
   let detailIndex = 0;
   for (const { marker, section } of detailSections) {
     const sectionImages = extractImageUrlsFromHtml(section)
       .map((src) => cleanImageUrl(src))
-      .filter((src) => src && !isNonProductImage(src) && isLikelyDetailImage(src) && !isLowQualityDetailVariant(src));
+      .filter((src) => src && !isNonProductImage(src) && (platform.key === "amazon" ? isLikelyDetailImage(src) : true) && !isLowQualityDetailVariant(src));
     let addedFromSection = 0;
     for (const src of sectionImages) {
       detailIndex += 1;
@@ -706,13 +807,17 @@ function cleanBrightDataScanResult(scan) {
     headings: usefulHeadings,
     page_text_sample: cleanText(scan.page_text_sample, PAGE_TEXT_SAMPLE_LENGTH),
     description: cleanText(scan.description, 700),
-    scan_scope: brightDataScanScope(mainImages.length, detailImages.length)
+    platform_key: scan.platform_key || null,
+    platform_name: scan.platform_name || null,
+    scan_scope: brightDataScanScope(mainImages.length, detailImages.length, scan)
   };
 }
 
-function brightDataScanScope(mainImageCount = 0, detailImageCount = 0) {
+function brightDataScanScope(mainImageCount = 0, detailImageCount = 0, scan = {}) {
   return {
     mode: "brightdata-full-evidence",
+    platform_key: scan.platform_key || null,
+    platform_name: scan.platform_name || null,
     collected: ["title", "description", "main_gallery_candidates", "detail_page_candidates", "review_insights", "page_text_sample"],
     selection_strategy: "region-first collect, dedupe variants, then select model evidence",
     main_image_count: mainImageCount,
@@ -852,6 +957,7 @@ async function scanProductLink(url, marketHint) {
         scan_scope: scanner === "brightdata" ? brightDataScanScope() : undefined
       };
     }
+    const platform = detectPlatform(response.url || url, html);
     const scan = {
       url,
       market_hint: marketHint,
@@ -859,6 +965,8 @@ async function scanProductLink(url, marketHint) {
       status: response.status,
       final_url: response.url,
       scanner,
+      platform_key: platform.key,
+      platform_name: platform.name,
       title,
       description: cleanText(extractMeta(html, "description") || extractMeta(html, "og:description"), 500),
       image_candidates: extractImageCandidates(html, response.url),
@@ -912,6 +1020,8 @@ function compactScanResult(item = {}) {
     status: item.status,
     final_url: item.final_url,
     scanner: item.scanner,
+    platform_key: item.platform_key || item.scan_scope?.platform_key || null,
+    platform_name: item.platform_name || item.scan_scope?.platform_name || null,
     error: item.error,
     message: item.message,
     title: cleanText(item.title, 180),

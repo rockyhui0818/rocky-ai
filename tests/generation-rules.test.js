@@ -95,6 +95,16 @@ assert(
   "Frontend scan evidence must explain that image candidates are collected by page region before selection."
 );
 
+assert(
+  generateSource.includes("platform_key: scan.platform_key"),
+  "Backend scan scope must include the detected platform key."
+);
+
+assert(
+  appSource.includes("平台识别："),
+  "Frontend scan evidence must show the detected platform strategy."
+);
+
 assert.strictEqual(
   countImageQueueEntries(appSource),
   11,
