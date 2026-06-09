@@ -236,9 +236,75 @@ async function testReviewAnalysisCoercesModelTextIntoVisibleInsights() {
   }
 }
 
+async function testReviewAnalysisShowsModelFailureReasonWhenFallbackIsUsed() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+    OPENAI_TEXT_MODEL: process.env.OPENAI_TEXT_MODEL,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY
+  };
+  const previousFetch = global.fetch;
+
+  process.env.NODE_ENV = "test";
+  process.env.OPENAI_API_KEY = "sk-test";
+  process.env.OPENAI_BASE_URL = "http://model.example/v1";
+  process.env.OPENAI_TEXT_MODEL = "text-test";
+  delete process.env.BRIGHTDATA_API_KEY;
+
+  global.fetch = async (url) => {
+    if (String(url) === "https://reviews.example/model-fails") {
+      return new Response(`
+        <html>
+          <head><title>Fallback Review Product</title></head>
+          <body>
+            <span itemprop="ratingValue" content="3.8"></span>
+            <span itemprop="reviewCount" content="2470"></span>
+            <section class="product-reviews">
+              <p class="review-body">Not permanent results but great for an event or occasional whitening routine.</p>
+            </section>
+          </body>
+        </html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+    if (String(url) === "http://model.example/v1/chat/completions") {
+      return new Response(JSON.stringify({ error: { message: "Invalid model token" } }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  try {
+    clearApiModules();
+    const handler = require(path.join(root, "api/review-analysis.js"));
+    const req = createJsonRequest({
+      review_urls: ["https://reviews.example/model-fails"],
+      product: { name: "Fallback Review Product" }
+    });
+    const res = createJsonResponse();
+
+    await handler(req, res);
+    const data = JSON.parse(res.body);
+    const analysis = data.review_modifier_analysis;
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(data.review_modifier_meta.reasoning_effort, "fallback");
+    assert.match(analysis.review_summary, /review|Review|摘要|评分|评价/);
+    assert.match(analysis.model_error, /Invalid model token/);
+    assert.match(analysis.source_note, /模型分析失败/);
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModules();
+  }
+}
+
 async function run() {
   await testReviewAnalysisRouteAnalyzesStandaloneLinks();
   await testReviewAnalysisCoercesModelTextIntoVisibleInsights();
+  await testReviewAnalysisShowsModelFailureReasonWhenFallbackIsUsed();
 }
 
 run()

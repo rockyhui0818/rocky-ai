@@ -267,15 +267,22 @@ function cleanText(value, maxLength = 1800) {
 }
 
 function cleanReviewText(value, maxLength = 260) {
-  return cleanText(
-    decodeHtmlEntities(String(value || "")
+  const cleaned = decodeHtmlEntities(String(value || "")
       .replace(/\\\//g, "/")
       .replace(/\\u0026/g, "&")
       .replace(/\\n|\\r|\\t/g, " ")
       .replace(/\\"/g, '"')
-      .replace(/\\'/g, "'")),
-    maxLength
-  );
+      .replace(/\\'/g, "'"))
+    .replace(/\b(?:Amazon Customer|Customer)\s+\d(?:\.\d)?\s+out of\s+5\s+stars\b/gi, " ")
+    .replace(/\b\d(?:\.\d)?\s+out of\s+5\s+stars\b/gi, " ")
+    .replace(/\bReviewed in [^.。!?]+ on [A-Z][a-z]+ \d{1,2}, \d{4}\b/gi, " ")
+    .replace(/\b(?:Size|Color|Colour|Style|Flavor|Flavour|Scent):\s*[^.。!?]{0,80}/gi, " ")
+    .replace(/\bVerified Purchase\b/gi, " ")
+    .replace(/\bBrief content visible, double tap to read full content\.?/gi, " ")
+    .replace(/\bFull content visible, double tap to read brief content\.?/gi, " ")
+    .replace(/\bRead more\b|\bRead less\b/gi, " ")
+    .replace(/\s+/g, " ");
+  return cleanText(cleaned, maxLength);
 }
 
 function isUsefulReviewSnippet(text = "") {
@@ -2259,7 +2266,7 @@ async function runSegmentedAnalysis({ baseUrl, apiKey, model, payload }) {
     } catch (error) {
       reviewModifierAnalysis = {
         ...reviewModifierAnalysis,
-        error: cleanText(error.message, 220),
+        model_error: cleanText(error.message, 220),
         source_note: `${reviewModifierAnalysis.source_note || ""} Review 模型分析失败，已使用规则降级结果。`
       };
     }
@@ -2526,7 +2533,7 @@ async function runReviewAnalysisWorkflow({ payload = {}, requestId = `review_${D
     } catch (error) {
       reviewModifierAnalysis = {
         ...reviewModifierAnalysis,
-        error: cleanText(error.message, 220),
+        model_error: cleanText(error.message, 220),
         source_note: `${reviewModifierAnalysis.source_note || ""} Review 模型分析失败，已使用规则降级结果。`
       };
     }

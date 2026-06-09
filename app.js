@@ -1582,6 +1582,7 @@ function reviewModifierCardEntries(insights = {}) {
     ["详情页提示词修饰", insights.prompt_modifiers?.detail_pages],
     ["不可覆盖约束", insights.prompt_modifiers?.negative_constraints],
     ["Review 证据统计", insights.evidence_summary],
+    ["模型失败原因", insights.model_error || insights.error],
     ["Review 分析来源", insights.source_note]
   ];
 }
@@ -1742,6 +1743,12 @@ function renderReviewSourceEvidence(scan = {}) {
 function renderInsightValue(value) {
   if (Array.isArray(value) && value.length) {
     return `<ul>${value.slice(0, 6).map((item) => `<li>${escapeHtml(typeof item === "string" ? item : JSON.stringify(item))}</li>`).join("")}</ul>`;
+  }
+  if (typeof value === "string" && value.trim()) {
+    return `<p>${escapeHtml(value)}</p>`;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return `<p>${escapeHtml(String(value))}</p>`;
   }
   if (value && typeof value === "object") {
     return `<p>${escapeHtml(JSON.stringify(value))}</p>`;

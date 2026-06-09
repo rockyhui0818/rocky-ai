@@ -78,6 +78,10 @@ async function testAmazonReviewBoilerplateIsFiltered() {
         <span data-hook="review-body">Images in this review</span>
         <span data-hook="review-body">There was a problem filtering reviews. Please reload the page.</span>
         <span data-hook="review-body">Top reviews from the United States</span>
+        <span data-hook="review-body">
+          Amazon Customer 5 out of 5 stars Happy with the results Reviewed in the United States on March 17, 2026 Size: 1 Count (Pack of 14) Verified Purchase Brief content visible, double tap to read full content.
+          Not permanent results but if u have a event great for here and there uses or add it to ur routine for teeth whitening Read more Read less
+        </span>
         <span data-hook="review-body">The whitening effect was visible after a week and the strips were easy to use.</span>
         <span data-hook="review-body">Packaging arrived crushed, which made me worry about delivery quality.</span>
       </body>
@@ -87,10 +91,10 @@ async function testAmazonReviewBoilerplateIsFiltered() {
   const insights = __test.extractReviewInsights(html);
   const joined = insights.snippets.join(" ");
 
-  assert.strictEqual(insights.snippets.length, 2);
-  assert.match(joined, /whitening effect/);
+  assert.strictEqual(insights.snippets.length, 3);
+  assert.match(joined, /event great|whitening effect/);
   assert.match(joined, /Packaging arrived crushed/);
-  assert(!/Images in this review|problem filtering reviews|Top reviews|out of 5 stars/i.test(joined));
+  assert(!/Images in this review|problem filtering reviews|Top reviews|Brief content visible|Read more|Read less|Verified Purchase|Amazon Customer|out of 5 stars/i.test(joined));
 
   if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = previousNodeEnv;
@@ -477,6 +481,14 @@ async function testFrontendShowsEnoughReviewEvidence() {
   assert(
     appSource.includes("renderReviewModifierCards"),
     "review modifier cards should be rendered through a shared complete result helper."
+  );
+  assert(
+    appSource.includes("typeof value === \"string\""),
+    "review modifier panel must render string fields such as analysis_method, review_summary, and source_note instead of showing empty placeholders."
+  );
+  assert(
+    appSource.includes("模型失败原因"),
+    "review modifier panel should expose model failure details when fallback is used."
   );
   assert(
     appSource.includes("reviewUrlInput: document.querySelector(\"#reviewUrlInput\")"),
