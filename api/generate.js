@@ -954,6 +954,24 @@ function amazonReviewUrl(productUrl = "") {
   }
 }
 
+function amazonReviewUrls(productUrl = "") {
+  const asin = extractAmazonAsin(productUrl);
+  if (!asin) return [];
+  try {
+    const url = new URL(productUrl);
+    if (!/amazon\./i.test(url.hostname)) return [];
+    const base = `${url.protocol}//${url.hostname}/product-reviews/${asin}`;
+    return [
+      `${base}?filterByStar=critical&reviewerType=all_reviews&pageNumber=1`,
+      `${base}?filterByStar=critical&reviewerType=all_reviews&pageNumber=2`,
+      `${base}?filterByStar=three_star&reviewerType=all_reviews&pageNumber=1`,
+      `${base}?sortBy=recent&reviewerType=all_reviews&pageNumber=1`
+    ];
+  } catch {
+    return [];
+  }
+}
+
 function mergeReviewInsights(primary = null, extra = null) {
   if (!primary && !extra) return null;
   const base = primary || {};
@@ -1002,15 +1020,20 @@ function mergeReviewInsights(primary = null, extra = null) {
 }
 
 async function fetchSupplementalReviewInsights(url, signal) {
-  const reviewUrl = amazonReviewUrl(url);
-  if (!reviewUrl || !process.env.BRIGHTDATA_API_KEY) return null;
-  try {
-    const { response, html } = await fetchProductHtml(reviewUrl, signal);
-    if (!response.ok || isBotProtectionPage(html, response.url)) return null;
-    return extractReviewInsights(html);
-  } catch {
-    return null;
+  const reviewUrls = amazonReviewUrls(url);
+  if (!reviewUrls.length || !process.env.BRIGHTDATA_API_KEY) return null;
+  let merged = null;
+  for (const reviewUrl of reviewUrls) {
+    if (merged?.snippets?.length >= MAX_REVIEW_SNIPPETS) break;
+    try {
+      const { response, html } = await fetchProductHtml(reviewUrl, signal);
+      if (!response.ok || isBotProtectionPage(html, response.url)) continue;
+      merged = mergeReviewInsights(merged, extractReviewInsights(html));
+    } catch {
+      continue;
+    }
   }
+  return merged;
 }
 
 function cleanBrightDataScanResult(scan) {
@@ -1837,6 +1860,7 @@ function buildReviewModifierPrompt({ reviewEvidence, product }) {
   return [
     "任务：只分析 review 信号；使用 ChatGPT gpt-5.5 对整体 review 数据做结构化分析，再把结论变成最终图片提示词的修饰层。不要分析图片，不要改变产品外观。",
     "必须把 review_evidence.overall_review_data、各链接 review_insights.snippets、rating、review_count、positive_terms、negative_terms、scene_terms 作为整体 review 数据一起分析；不要只做关键词罗列。",
+    "优先分析差评和低星评论：先提炼不满意原因、购买阻碍、效果/尺寸/包装/配送/使用难度/预期落差，再补充好评卖点；差评结论必须转化为详情页 FAQ、规格解释、使用步骤和风险预防文案。",
     "Review 权重低于上传产品图和美国链接图片结构；只能用于：卖点措辞校准、巴西葡语自然表达、真实使用场景、差评预防、竞品弱点补充。",
     "输出 JSON：{analysis_method,review_summary,sentiment_breakdown:{positive:[最多8条],negative:[最多8条],neutral:[最多6条]},customer_pain_points:[最多8条],purchase_barriers:[最多8条],customer_language_examples:[最多8条],high_frequency_praise:[最多8条],high_frequency_complaints:[最多8条],local_language:[最多12个],usage_scenarios:[最多8条],competitor_weaknesses:[最多8条],prompt_modifiers:{main_images:[最多8条],detail_pages:[最多8条],negative_constraints:[最多6条]},evidence_summary:{source_count,snippet_count,rating_average,review_count_total},source_note}。",
     "review_summary 必须是模型对整体 review 的具体结论；customer_pain_points 和 purchase_barriers 必须来自 review 原文/评分/评论数综合判断；customer_language_examples 必须保留用户原话或贴近原文的短句。",

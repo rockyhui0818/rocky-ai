@@ -169,6 +169,95 @@ async function testAmazonReviewPageIsFetchedWhenProductPageHasOnlyReviewCount() 
   }
 }
 
+async function testAmazonNegativeReviewPagesArePrioritized() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY,
+    BRIGHTDATA_ZONE: process.env.BRIGHTDATA_ZONE,
+    BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS
+  };
+  const previousFetch = global.fetch;
+  const calls = [];
+
+  process.env.NODE_ENV = "test";
+  process.env.BRIGHTDATA_API_KEY = "brd-test";
+  process.env.BRIGHTDATA_ZONE = "web_unlocker1";
+  process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "200";
+
+  global.fetch = async (url, options = {}) => {
+    assert.strictEqual(String(url), "https://api.brightdata.com/request");
+    const body = JSON.parse(options.body || "{}");
+    calls.push(body.url);
+    const target = String(body.url);
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ") && target.includes("filterByStar=critical")) {
+      return new Response(`
+        <html>
+          <body>
+            <div data-hook="review">
+              <span data-hook="review-body">The whitening did not last long and the strips were hard to keep in place.</span>
+            </div>
+            <div data-hook="review">
+              <span data-hook="review-body">Packaging arrived damaged and several strips were dry, so I would not recommend it.</span>
+            </div>
+          </body>
+        </html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ")) {
+      return new Response(`
+        <html>
+          <body>
+            <div data-hook="review">
+              <span data-hook="review-body">Easy to use before an event and the taste was mild.</span>
+            </div>
+          </body>
+        </html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    return new Response(`
+      <html>
+        <head><title>Hismile Whitening Treatment</title></head>
+        <body>
+          <span itemprop="ratingValue" content="3.8"></span>
+          <span itemprop="reviewCount" content="2470"></span>
+          <div id="landingImage" data-a-dynamic-image='{"https://m.media-amazon.com/images/I/main.jpg":[1000,1000]}'></div>
+        </body>
+      </html>
+    `, { status: 200, headers: { "Content-Type": "text/html" } });
+  };
+
+  try {
+    clearApiModule();
+    const { scanProductLink } = require(path.join(root, "api/generate.js"));
+    const result = await scanProductLink(
+      "https://www.amazon.com/Hismile-Whitening-Treatment-Combining-Correction/dp/B0F42ZTSZZ?ref_=ast_sto_dp&th=1",
+      { market: "us" }
+    );
+
+    assert(
+      calls.some((url) => String(url).includes("filterByStar=critical")),
+      `expected Amazon negative review page fetch, got ${JSON.stringify(calls)}`
+    );
+    assert(
+      calls.findIndex((url) => String(url).includes("filterByStar=critical")) <
+        calls.findIndex((url) => String(url).includes("sortBy=recent")),
+      `expected negative review fetch before recent review fetch, got ${JSON.stringify(calls)}`
+    );
+    const joined = result.review_insights.snippets.join(" ");
+    assert.match(joined, /did not last long/);
+    assert.match(joined, /Packaging arrived damaged/);
+    assert.match(joined, /Easy to use before an event/);
+    assert.strictEqual(result.review_insights.review_count, 2470);
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModule();
+  }
+}
+
 async function testPlatformReviewSectionsArePreferredOverPageWideFallback() {
   const previousNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = "test";
@@ -251,6 +340,7 @@ async function testReviewEvidenceIsSentToModelAnalysis() {
       assert.match(userMessage, /overall_review_data/);
       assert.match(userMessage, /review_summary/);
       assert.match(userMessage, /customer_pain_points/);
+      assert.match(userMessage, /优先分析差评/);
       assert.match(userMessage, /Great whitening strips/);
       assert.match(userMessage, /Packaging arrived damaged/);
       return new Response(JSON.stringify({
@@ -512,6 +602,7 @@ async function run() {
   await testNestedAndSerializedReviewsAreExtracted();
   await testAmazonReviewBoilerplateIsFiltered();
   await testAmazonReviewPageIsFetchedWhenProductPageHasOnlyReviewCount();
+  await testAmazonNegativeReviewPagesArePrioritized();
   await testPlatformReviewSectionsArePreferredOverPageWideFallback();
   await testReviewEvidenceIsSentToModelAnalysis();
   await testRatingOnlyReviewEvidenceStillShowsConcreteStats();
