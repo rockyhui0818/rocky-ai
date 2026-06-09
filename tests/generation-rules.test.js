@@ -6,6 +6,7 @@ const root = path.resolve(__dirname, "..");
 const generateSource = fs.readFileSync(path.join(root, "api/generate.js"), "utf8");
 const imageSource = fs.readFileSync(path.join(root, "api/image.js"), "utf8");
 const appSource = fs.readFileSync(path.join(root, "app.js"), "utf8");
+const htmlSource = fs.readFileSync(path.join(root, "index.html"), "utf8");
 
 function countImageQueueEntries(source) {
   const queueStart = source.indexOf("function buildImagePromptQueue(pack)");
@@ -103,6 +104,34 @@ assert(
 assert(
   appSource.includes("平台识别："),
   "Frontend scan evidence must show the detected platform strategy."
+);
+
+assert(
+  appSource.includes("reviewOutput"),
+  "Frontend must expose a separate Review analysis page output."
+);
+
+assert(
+  htmlSource.includes('data-tab="review"'),
+  "Frontend navigation must include a dedicated Review analysis tab."
+);
+
+assert(
+  htmlSource.includes('id="reviewOutput"'),
+  "Frontend must include a dedicated Review analysis panel."
+);
+
+assert(
+  appSource.includes("function renderReviewAnalysisPage()"),
+  "Frontend must render Review analysis separately from the main generation workflow."
+);
+
+assert(
+  !appSource.slice(
+    appSource.indexOf("els.briefOutput.innerHTML"),
+    appSource.indexOf("els.imageOutput.innerHTML")
+  ).includes("renderReviewInsightsPanel()"),
+  "Main link deconstruction page must not embed the detailed Review panel."
 );
 
 assert.strictEqual(

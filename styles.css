@@ -769,6 +769,26 @@ button:disabled {
   padding-left: 18px;
 }
 
+.review-summary-grid {
+  margin: 14px 0;
+}
+
+.review-source-list {
+  display: grid;
+  gap: 12px;
+}
+
+.review-source-card ul {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0 0;
+  padding-left: 18px;
+}
+
+.review-source-card li {
+  line-height: 1.5;
+}
+
 .final-prompt-panel {
   border: 1px solid rgba(124, 58, 237, 0.28);
   background:

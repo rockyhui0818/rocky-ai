@@ -348,6 +348,7 @@ const els = {
   resetBtn: document.querySelector("#resetBtn"),
   workspacePage: document.querySelector("#workspacePage"),
   briefOutput: document.querySelector("#briefOutput"),
+  reviewOutput: document.querySelector("#reviewOutput"),
   imageOutput: document.querySelector("#imageOutput"),
   detailOutput: document.querySelector("#detailOutput"),
   apiOutput: document.querySelector("#apiOutput"),
@@ -1098,7 +1099,6 @@ function renderOutputs() {
     <h3>逐条链接分析</h3>
     <div class="link-analysis-list">${renderLinkAnalysis(pack.urlInfo.links)}</div>
     ${renderFinalPromptEditor(pack)}
-    ${renderReviewInsightsPanel()}
     ${renderLinkScanEvidence()}
     ${renderModelLinkDeconstruction()}
     <h3>主图与详情页方向</h3>
@@ -1109,6 +1109,8 @@ function renderOutputs() {
       <div><b>最终生成逻辑</b><span>整体设计结构、外观包装和色彩可跟随美国链接，内容语言和生活场景根据巴西链接本土化，最终输出必须去品牌化。</span></div>
     </div>
   `;
+
+  els.reviewOutput.innerHTML = renderReviewAnalysisPage();
 
   els.imageOutput.innerHTML = `
     <h2>图片生成提示词</h2>
@@ -1573,6 +1575,51 @@ function renderReviewInsightsPanel() {
         </div>
       ` : `<p>当前模型结果没有返回 Review Insights。请确认链接页面是否有可见评分或评论摘要。</p>`}
     </section>
+  `;
+}
+
+function renderReviewAnalysisPage() {
+  const result = state.latestRemoteResult;
+  const scans = Array.isArray(result?.link_scan_results) ? result.link_scan_results : [];
+  const reviewScans = scans.filter((scan) => hasReviewEvidence(scan.review_insights));
+  const meta = result?.review_modifier_meta || {};
+  return `
+    <h2>Review 分析</h2>
+    <p>这里单独展示链接采集到的 Review 原始信号和 ChatGPT 5.5 的整体分析结论。该模块只作为卖点、痛点、葡语表达和差评预防参考，不改变 11 张图逐张生成流程。</p>
+    <div class="signal-grid review-summary-grid">
+      <div class="signal"><b>含 Review 链接</b><span>${reviewScans.length} 条</span></div>
+      <div class="signal"><b>模型状态</b><span>${escapeHtml(meta.reasoning_effort || (result ? "已返回" : "等待生成"))}</span></div>
+      <div class="signal"><b>Token</b><span>${escapeHtml(String(meta.usage?.total_tokens || 0))}</span></div>
+      <div class="signal"><b>用途边界</b><span>只修饰文案和痛点，不改产品外观</span></div>
+    </div>
+    ${renderReviewInsightsPanel()}
+    <h3>逐链接 Review 原始证据</h3>
+    ${reviewScans.length ? `
+      <div class="review-source-list">
+        ${reviewScans.map(renderReviewSourceEvidence).join("")}
+      </div>
+    ` : `<p>暂无可见 Review 原始证据。请先在工作流输入中添加可采集 review 的商品链接并开始自动生成。</p>`}
+  `;
+}
+
+function renderReviewSourceEvidence(scan = {}) {
+  const reviews = scan.review_insights || {};
+  const snippets = Array.isArray(reviews.snippets) ? reviews.snippets : [];
+  const terms = (items = []) => items.slice(0, 8).map((item) => typeof item === "string" ? item : `${item.term || ""}${item.count ? ` (${item.count})` : ""}`).filter(Boolean);
+  return `
+    <article class="scan-evidence-card review-source-card">
+      <b>${escapeHtml(scan.title || scan.url || "Review 来源")}</b>
+      <span>${escapeHtml([scan.platform_name, scan.final_url || scan.url].filter(Boolean).join(" · "))}</span>
+      <div class="scan-tags">
+        ${reviews.rating ? `<em>${escapeHtml(`评分 ${reviews.rating}`)}</em>` : ""}
+        ${reviews.review_count ? `<em>${escapeHtml(`${reviews.review_count} 条评价`)}</em>` : ""}
+        ${snippets.length ? `<em>${escapeHtml(`${snippets.length} 条摘要`)}</em>` : ""}
+      </div>
+      ${terms(reviews.positive_terms).length ? `<p><b>好评信号：</b>${escapeHtml(terms(reviews.positive_terms).join(" / "))}</p>` : ""}
+      ${terms(reviews.negative_terms).length ? `<p><b>差评信号：</b>${escapeHtml(terms(reviews.negative_terms).join(" / "))}</p>` : ""}
+      ${terms(reviews.scene_terms).length ? `<p><b>场景信号：</b>${escapeHtml(terms(reviews.scene_terms).join(" / "))}</p>` : ""}
+      ${snippets.length ? `<ul>${snippets.slice(0, 12).map((snippet) => `<li>${escapeHtml(snippet)}</li>`).join("")}</ul>` : `<p>该链接只有评分/评论数，未采集到可见评论正文。</p>`}
+    </article>
   `;
 }
 
@@ -2628,6 +2675,7 @@ function activateTab(target) {
   const targetPanel = {
     workspace: els.workspacePage,
     brief: els.briefOutput,
+    review: els.reviewOutput,
     image: els.imageOutput,
     detail: els.detailOutput,
     api: els.apiOutput,
