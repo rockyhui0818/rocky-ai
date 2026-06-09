@@ -175,17 +175,30 @@ async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceIma
     form.append("size", size);
     form.append("response_format", "b64_json");
     appendReferenceImages(form, referenceBlobs);
-    const editResponse = await fetchProvider(baseUrl, "/images/edits", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form
-    });
-    const { data: editData, rawText: editRawText } = await readProviderPayload(editResponse);
-    if (editResponse.ok) {
-      return { data: editData, mode: "reference-edit" };
+    let editResponse = null;
+    let editData = {};
+    let editRawText = "";
+    try {
+      editResponse = await fetchProvider(baseUrl, "/images/edits", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form
+      });
+      ({ data: editData, rawText: editRawText } = await readProviderPayload(editResponse));
+      if (editResponse.ok) {
+        return { data: editData, mode: "reference-edit" };
+      }
+    } catch (error) {
+      editFailure = {
+        endpoint: "/images/edits",
+        status: error.statusCode || 502,
+        message: error.message || "Reference image edit request failed.",
+        details: error.details || null,
+        raw: ""
+      };
     }
 
-    if (referenceBlobs.length > 1) {
+    if (!editFailure && referenceBlobs.length > 1) {
       const singleForm = new FormData();
       singleForm.append("model", model);
       singleForm.append("prompt", prompt);
@@ -211,7 +224,7 @@ async function requestImage({ baseUrl, apiKey, model, prompt, size, referenceIma
         },
         raw: cleanProviderText(singleRawText) || cleanProviderText(editRawText)
       };
-    } else {
+    } else if (!editFailure) {
       editFailure = {
         endpoint: "/images/edits",
         status: editResponse.status,

@@ -140,6 +140,89 @@ async function run() {
   assert.deepStrictEqual(sizedRequests.map((request) => request.body.size), ["1024x1024", "1536x1024"]);
   const sizedPayload = JSON.parse(sizedRes.body);
   assert.deepStrictEqual(sizedPayload.images.map((image) => image.size), ["1024x1024", "1536x1024"]);
+
+  process.env.OPENAI_IMAGE_API_KEY = "sk-test";
+  process.env.OPENAI_IMAGE_BASE_URL = "http://154.64.230.35:3000/v1";
+  process.env.OPENAI_IMAGE_MODEL = "gpt-image-2-pro";
+  const fallbackRequests = [];
+  global.fetch = async (url, options = {}) => {
+    fallbackRequests.push(String(url));
+    if (String(url).endsWith("/images/edits")) {
+      return new Response(JSON.stringify({ error: { message: "Invalid token (request id: test)" } }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    return new Response(JSON.stringify({ data: [{ b64_json: "fallback-ok" }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+
+  clearApiModule("api/image.js");
+  const fallbackHandler = require(path.join(root, "api/image.js"));
+  const fallbackRes = createMockResponse();
+  await fallbackHandler(createMockRequest({
+    prompt: "Reference image fallback",
+    reference_image: "data:image/png;base64,iVBORw0KGgo=",
+    max_images: 1
+  }), fallbackRes);
+
+  global.fetch = previousFetch;
+  for (const [key, value] of Object.entries(previousEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+
+  assert.strictEqual(fallbackRes.statusCode, 200);
+  assert.deepStrictEqual(fallbackRequests, [
+    "http://154.64.230.35:3000/v1/images/edits",
+    "http://154.64.230.35:3000/v1/images/generations"
+  ]);
+  const fallbackPayload = JSON.parse(fallbackRes.body);
+  assert.strictEqual(fallbackPayload.images[0].b64_json, "fallback-ok");
+  assert.strictEqual(fallbackPayload.mode, "text-generation");
+
+  process.env.OPENAI_IMAGE_API_KEY = "sk-test";
+  process.env.OPENAI_IMAGE_BASE_URL = "http://154.64.230.35:3000/v1";
+  process.env.OPENAI_IMAGE_MODEL = "gpt-image-2-pro";
+  const timeoutFallbackRequests = [];
+  global.fetch = async (url, options = {}) => {
+    timeoutFallbackRequests.push(String(url));
+    if (String(url).endsWith("/images/edits")) {
+      const abortError = new Error("The operation was aborted.");
+      abortError.name = "AbortError";
+      throw abortError;
+    }
+    return new Response(JSON.stringify({ data: [{ b64_json: "timeout-fallback-ok" }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+
+  clearApiModule("api/image.js");
+  const timeoutFallbackHandler = require(path.join(root, "api/image.js"));
+  const timeoutFallbackRes = createMockResponse();
+  await timeoutFallbackHandler(createMockRequest({
+    prompt: "Reference image timeout fallback",
+    reference_image: "data:image/png;base64,iVBORw0KGgo=",
+    max_images: 1
+  }), timeoutFallbackRes);
+
+  global.fetch = previousFetch;
+  for (const [key, value] of Object.entries(previousEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+
+  assert.strictEqual(timeoutFallbackRes.statusCode, 200);
+  assert.deepStrictEqual(timeoutFallbackRequests, [
+    "http://154.64.230.35:3000/v1/images/edits",
+    "http://154.64.230.35:3000/v1/images/generations"
+  ]);
+  const timeoutFallbackPayload = JSON.parse(timeoutFallbackRes.body);
+  assert.strictEqual(timeoutFallbackPayload.images[0].b64_json, "timeout-fallback-ok");
+  assert.strictEqual(timeoutFallbackPayload.mode, "text-generation");
 }
 
 run()
