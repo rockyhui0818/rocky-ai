@@ -508,17 +508,17 @@ function summarizeApiError(error) {
   const firstFailure = failures[0] || {};
   const providerDetails = firstFailure.details || detail;
   return [
-    payload.stage ? `失败阶段：${payload.stage}` : "",
-    payload.request_id ? `请求编号：${payload.request_id}` : "",
-    payload.status ? `HTTP 状态：${payload.status}${payload.status_text ? ` ${payload.status_text}` : ""}` : "",
-    payload.raw ? `响应内容：${payload.raw}` : "",
     payload.message,
-    payload.error,
     error?.message,
     firstFailure.message,
     providerDetails.provider_message,
     providerDetails.reference_edit_failure?.message,
-    providerDetails.provider_raw
+    providerDetails.provider_raw,
+    payload.error,
+    payload.raw ? `响应内容：${payload.raw}` : "",
+    payload.status ? `HTTP 状态：${payload.status}${payload.status_text ? ` ${payload.status_text}` : ""}` : "",
+    payload.request_id ? `请求编号：${payload.request_id}` : "",
+    payload.stage ? `失败阶段：${payload.stage}` : ""
   ].map(readableErrorText).filter(Boolean).find((item) => String(item).trim()) || "请检查 API 配置或稍后重试。";
 }
 
