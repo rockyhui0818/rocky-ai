@@ -1103,15 +1103,40 @@ function hasReviewEvidence(insights = {}) {
 
 function buildReviewModifierEvidence(scanResults = []) {
   const grouped = splitScansByMarket(scanResults || []);
-  return {
+  const evidence = {
     us: reviewEvidenceFor(grouped.us),
     brazil: reviewEvidenceFor(grouped.brazil),
     other: reviewEvidenceFor(grouped.other)
+  };
+  evidence.overall_review_data = summarizeReviewEvidence(evidence);
+  return evidence;
+}
+
+function summarizeReviewEvidence(reviewEvidence = {}) {
+  const allEvidence = [...(reviewEvidence.us || []), ...(reviewEvidence.brazil || []), ...(reviewEvidence.other || [])];
+  const snippets = [];
+  let reviewCountTotal = 0;
+  const ratings = [];
+  for (const item of allEvidence) {
+    const insights = item.review_insights || {};
+    if (Number(insights.review_count || 0)) reviewCountTotal += Number(insights.review_count || 0);
+    if (Number(insights.rating || 0)) ratings.push(Number(insights.rating));
+    for (const snippet of insights.snippets || []) {
+      if (snippet && !snippets.includes(snippet)) snippets.push(snippet);
+    }
+  }
+  return {
+    source_count: allEvidence.length,
+    snippet_count: snippets.length,
+    rating_average: ratings.length ? Number((ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length).toFixed(2)) : null,
+    review_count_total: reviewCountTotal || null,
+    representative_snippets: snippets.slice(0, MAX_REVIEW_SNIPPETS)
   };
 }
 
 function fallbackReviewModifierAnalysis(reviewEvidence = {}) {
   const allEvidence = [...(reviewEvidence.us || []), ...(reviewEvidence.brazil || []), ...(reviewEvidence.other || [])];
+  const summary = reviewEvidence.overall_review_data || summarizeReviewEvidence(reviewEvidence);
   const positiveTerms = [];
   const negativeTerms = [];
   const sceneTerms = [];
@@ -1124,6 +1149,18 @@ function fallbackReviewModifierAnalysis(reviewEvidence = {}) {
     for (const snippet of insights.snippets || []) if (snippet && !snippets.includes(snippet)) snippets.push(snippet);
   }
   return {
+    analysis_method: "fallback-review-terms",
+    review_summary: snippets.length
+      ? `已采集 ${summary.snippet_count || snippets.length} 条可见 review 摘要，规则降级提取好评、差评和使用场景信号。`
+      : "未采集到足够 review 原文，规则降级仅使用评分、评论数和关键词信号。",
+    sentiment_breakdown: {
+      positive: positiveTerms.slice(0, 8),
+      negative: negativeTerms.slice(0, 8),
+      neutral: sceneTerms.slice(0, 8)
+    },
+    customer_pain_points: negativeTerms.slice(0, 8),
+    purchase_barriers: negativeTerms.slice(0, 6).map((term) => `${term} 相关疑虑需要在详情页提前解释。`),
+    customer_language_examples: snippets.slice(0, 8),
     high_frequency_praise: positiveTerms.slice(0, 5),
     high_frequency_complaints: negativeTerms.slice(0, 5),
     local_language: [...positiveTerms, ...negativeTerms].slice(0, 8),
@@ -1133,6 +1170,12 @@ function fallbackReviewModifierAnalysis(reviewEvidence = {}) {
       main_images: positiveTerms.slice(0, 4).map((term) => `可在主图/副图文案中自然体现 ${term}，但不改变产品外观。`),
       detail_pages: negativeTerms.slice(0, 4).map((term) => `在详情页提前解释 ${term} 相关疑虑，降低误解和退货。`),
       negative_constraints: ["Review 只能修饰卖点措辞、本土语言和差评预防，不能覆盖上传产品图、美国链接图片结构或真实产品外观。"]
+    },
+    evidence_summary: {
+      source_count: summary.source_count || allEvidence.length,
+      snippet_count: summary.snippet_count || snippets.length,
+      rating_average: summary.rating_average || null,
+      review_count_total: summary.review_count_total || null
     },
     source_note: snippets.length ? `基于 ${allEvidence.length} 条链接 review 信号和可见评论摘要。` : "未提取到足够 review 摘要，仅使用评分/关键词信号。"
   };
@@ -1460,9 +1503,11 @@ function buildSingleImageAnalysisPrompt({ unit, product }) {
 
 function buildReviewModifierPrompt({ reviewEvidence, product }) {
   return [
-    "任务：只分析 review 信号，把它变成最终图片提示词的修饰层。不要分析图片，不要改变产品外观。",
+    "任务：只分析 review 信号；使用 ChatGPT gpt-5.5 对整体 review 数据做结构化分析，再把结论变成最终图片提示词的修饰层。不要分析图片，不要改变产品外观。",
+    "必须把 review_evidence.overall_review_data、各链接 review_insights.snippets、rating、review_count、positive_terms、negative_terms、scene_terms 作为整体 review 数据一起分析；不要只做关键词罗列。",
     "Review 权重低于上传产品图和美国链接图片结构；只能用于：卖点措辞校准、巴西葡语自然表达、真实使用场景、差评预防、竞品弱点补充。",
-    "输出 JSON：{high_frequency_praise:[最多8条],high_frequency_complaints:[最多8条],local_language:[最多12个],usage_scenarios:[最多8条],competitor_weaknesses:[最多8条],prompt_modifiers:{main_images:[最多8条],detail_pages:[最多8条],negative_constraints:[最多6条]},source_note}。",
+    "输出 JSON：{analysis_method,review_summary,sentiment_breakdown:{positive:[最多8条],negative:[最多8条],neutral:[最多6条]},customer_pain_points:[最多8条],purchase_barriers:[最多8条],customer_language_examples:[最多8条],high_frequency_praise:[最多8条],high_frequency_complaints:[最多8条],local_language:[最多12个],usage_scenarios:[最多8条],competitor_weaknesses:[最多8条],prompt_modifiers:{main_images:[最多8条],detail_pages:[最多8条],negative_constraints:[最多6条]},evidence_summary:{source_count,snippet_count,rating_average,review_count_total},source_note}。",
+    "review_summary 必须是模型对整体 review 的具体结论；customer_pain_points 和 purchase_barriers 必须来自 review 原文/评分/评论数综合判断；customer_language_examples 必须保留用户原话或贴近原文的短句。",
     JSON.stringify({ product: compactProduct(product), review_evidence: reviewEvidence })
   ].join("\n");
 }

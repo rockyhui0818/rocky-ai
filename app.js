@@ -1535,6 +1535,11 @@ function renderReviewInsightsPanel() {
   const hasInsight = insights && typeof insights === "object";
   const cards = hasInsight
     ? [
+        ["整体 Review 结论", insights.review_summary],
+        ["情绪拆分", insights.sentiment_breakdown],
+        ["客户痛点", insights.customer_pain_points],
+        ["购买阻碍", insights.purchase_barriers],
+        ["用户原话示例", insights.customer_language_examples],
         ["高频好评点", insights.high_frequency_praise],
         ["高频差评点", insights.high_frequency_complaints],
         ["本土语言表达", insights.local_language],
@@ -1543,6 +1548,7 @@ function renderReviewInsightsPanel() {
         ["主图提示词修饰", insights.prompt_modifiers?.main_images || insights.how_to_use],
         ["详情页提示词修饰", insights.prompt_modifiers?.detail_pages],
         ["不可覆盖约束", insights.prompt_modifiers?.negative_constraints],
+        ["Review 证据统计", insights.evidence_summary],
         ["Review 分析来源", insights.source_note]
       ]
     : [];

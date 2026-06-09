@@ -90,12 +90,25 @@ async function testReviewEvidenceIsSentToModelAnalysis() {
     requests.push(userMessage);
 
     if (String(userMessage).includes("只分析 review 信号")) {
+      assert.match(userMessage, /overall_review_data/);
+      assert.match(userMessage, /review_summary/);
+      assert.match(userMessage, /customer_pain_points/);
       assert.match(userMessage, /Great whitening strips/);
       assert.match(userMessage, /Packaging arrived damaged/);
       return new Response(JSON.stringify({
         choices: [{
           message: {
             content: JSON.stringify({
+              analysis_method: "gpt-5.5整体review分析",
+              review_summary: "Customers like visible whitening and easy daily use, but packaging damage creates purchase anxiety.",
+              sentiment_breakdown: {
+                positive: ["visible whitening", "easy daily use"],
+                negative: ["damaged packaging"],
+                neutral: ["coffee stain use case"]
+              },
+              customer_pain_points: ["packaging damage", "sensitivity concern"],
+              purchase_barriers: ["fear of damaged delivery", "uncertainty about results"],
+              customer_language_examples: ["visible results after a few days", "worked well for coffee stains"],
               high_frequency_praise: ["visible whitening", "easy daily use"],
               high_frequency_complaints: ["damaged packaging"],
               local_language: ["uso diario", "resultado visivel"],
@@ -106,7 +119,13 @@ async function testReviewEvidenceIsSentToModelAnalysis() {
                 detail_pages: ["Address packaging and sensitivity concerns."],
                 negative_constraints: ["Do not alter product appearance."]
               },
-              source_note: "model-reviewed snippets"
+              evidence_summary: {
+                source_count: 1,
+                snippet_count: 2,
+                rating_average: 4.5,
+                review_count_total: 789
+              },
+              source_note: "gpt-5.5 analyzed full review evidence"
             })
           }
         }],
@@ -177,7 +196,14 @@ async function testReviewEvidenceIsSentToModelAnalysis() {
       requests.some((prompt) => String(prompt).includes("只分析 review 信号")),
       "review modifier prompt should be sent to the model when review evidence exists"
     );
-    assert.strictEqual(result.result.review_modifier_analysis.source_note, "model-reviewed snippets");
+    assert.strictEqual(result.result.review_modifier_analysis.source_note, "gpt-5.5 analyzed full review evidence");
+    assert.match(result.result.review_modifier_analysis.review_summary, /visible whitening/);
+    assert.deepStrictEqual(result.result.review_modifier_analysis.evidence_summary, {
+      source_count: 1,
+      snippet_count: 2,
+      rating_average: 4.5,
+      review_count_total: 789
+    });
   } finally {
     global.fetch = previousFetch;
     restoreEnv(previousEnv);
@@ -200,6 +226,14 @@ async function testFrontendShowsEnoughReviewEvidence() {
   assert(
     appSource.includes("Review 分析来源"),
     "review modifier panel should expose the model source note"
+  );
+  assert(
+    appSource.includes("整体 Review 结论"),
+    "review modifier panel should show the model's overall review summary"
+  );
+  assert(
+    appSource.includes("购买阻碍"),
+    "review modifier panel should show model-analyzed purchase barriers"
   );
 }
 
