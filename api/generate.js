@@ -4,7 +4,7 @@ const { filter, supabaseRequest } = require("./_lib/supabase");
 
 const MODEL_TIMEOUT_MS = 240000;
 const DIRECT_LINK_SCAN_TIMEOUT_MS = 6000;
-const BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = 90000;
+const BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = 120000;
 const MAX_SCAN_LINKS = 6;
 const MAX_IMAGE_CANDIDATES = 15;
 const MAX_MAIN_IMAGE_CANDIDATES = 8;
@@ -21,7 +21,7 @@ const IMAGE_ANALYSIS_BUDGET_MS = 220000;
 const REVIEW_ANALYSIS_BUDGET_TOKENS = 900;
 const BRIGHTDATA_API_URL = "https://api.brightdata.com/request";
 const USEFUL_IMAGE_TYPES = new Set(["main-image", "detail-page-image"]);
-const MIN_PRODUCTION_BRIGHTDATA_TIMEOUT_MS = 90000;
+const MIN_PRODUCTION_BRIGHTDATA_TIMEOUT_MS = 120000;
 const MAX_RAW_MAIN_IMAGE_CANDIDATES = 80;
 const MAX_RAW_DETAIL_IMAGE_CANDIDATES = 120;
 const LISTING_IMAGE_TYPES = [
@@ -229,6 +229,31 @@ function cleanReviewText(value, maxLength = 260) {
       .replace(/\\'/g, "'")),
     maxLength
   );
+}
+
+function isUsefulReviewSnippet(text = "") {
+  const value = String(text || "").trim();
+  if (value.length < 18) return false;
+  const lower = value.toLowerCase();
+  const boilerplatePatterns = [
+    /^\d(?:\.\d)?\s+out of\s+5\s+stars$/i,
+    /^images in this review$/i,
+    /^top reviews/i,
+    /^customer reviews$/i,
+    /^sort by/i,
+    /^filter by/i,
+    /^showing \d/i,
+    /^verified purchase$/i,
+    /there was a problem filtering reviews/i,
+    /please reload the page/i,
+    /translate all reviews to english/i,
+    /review this product/i,
+    /share your thoughts/i
+  ];
+  if (boilerplatePatterns.some((pattern) => pattern.test(value))) return false;
+  const meaningfulTerms = /(quality|size|easy|durable|package|packaging|shipping|delivery|recommend|results?|worked|effect|visible|use|used|flavor|taste|support|replace|arrived|qualidade|tamanho|f[aá]cil|dur[aá]vel|embalagem|entrega|recomendo|resultado|funciona|chegou|bom|boa|ruim|excelente)/i;
+  if (meaningfulTerms.test(value)) return true;
+  return lower.split(/\s+/).length >= 8 && /[.!?。！？]/.test(value);
 }
 
 function extractMeta(html, name) {
@@ -718,7 +743,7 @@ function extractReviewSnippets(html) {
   const addSnippet = (value) => {
     if (snippets.length >= MAX_REVIEW_SNIPPETS) return;
     const text = cleanReviewText(value, 260);
-    if (text.length >= 18 && !snippets.includes(text)) snippets.push(text);
+    if (isUsefulReviewSnippet(text) && !snippets.includes(text)) snippets.push(text);
   };
 
   const patterns = [
@@ -753,7 +778,7 @@ function extractReviewSnippets(html) {
       .filter((item) => /(quality|size|easy|durable|package|shipping|delivery|recommend|qualidade|tamanho|f[aá]cil|dur[aá]vel|embalagem|entrega|recomendo|bom|boa|ruim|excelente)/i.test(item));
     for (const item of reviewLike) {
       if (snippets.length >= MAX_REVIEW_SNIPPETS) break;
-      if (item.length >= 18 && !snippets.includes(item)) snippets.push(item);
+      if (isUsefulReviewSnippet(item) && !snippets.includes(item)) snippets.push(item);
     }
   }
 
@@ -792,6 +817,92 @@ function extractReviewInsights(html) {
       "casa", "escritório", "viagem", "rua", "dia a dia", "família", "trabalho"
     ])
   };
+}
+
+function extractAmazonAsin(url = "") {
+  const text = String(url || "");
+  const patterns = [
+    /\/dp\/([A-Z0-9]{10})(?:[/?#]|$)/i,
+    /\/gp\/product\/([A-Z0-9]{10})(?:[/?#]|$)/i,
+    /\/product-reviews\/([A-Z0-9]{10})(?:[/?#]|$)/i,
+    /(?:[?&]asin=)([A-Z0-9]{10})(?:[&#]|$)/i
+  ];
+  for (const pattern of patterns) {
+    const asin = text.match(pattern)?.[1];
+    if (asin) return asin.toUpperCase();
+  }
+  return "";
+}
+
+function amazonReviewUrl(productUrl = "") {
+  const asin = extractAmazonAsin(productUrl);
+  if (!asin) return "";
+  try {
+    const url = new URL(productUrl);
+    if (!/amazon\./i.test(url.hostname)) return "";
+    return `${url.protocol}//${url.hostname}/product-reviews/${asin}?sortBy=recent&reviewerType=all_reviews`;
+  } catch {
+    return "";
+  }
+}
+
+function mergeReviewInsights(primary = null, extra = null) {
+  if (!primary && !extra) return null;
+  const base = primary || {};
+  const addition = extra || {};
+  const mergeTerms = (left = [], right = []) => {
+    const counts = new Map();
+    for (const item of [...left, ...right]) {
+      const term = typeof item === "string" ? item : item?.term;
+      const count = typeof item === "string" ? 1 : Number(item?.count || 1);
+      if (!term) continue;
+      counts.set(term, (counts.get(term) || 0) + count);
+    }
+    return Array.from(counts.entries())
+      .map(([term, count]) => ({ term, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  };
+  const snippets = [];
+  for (const snippet of [...(base.snippets || []), ...(addition.snippets || [])]) {
+    if (snippet && !snippets.includes(snippet)) snippets.push(snippet);
+  }
+  const reviewText = snippets.join(" ");
+  return {
+    rating: base.rating || addition.rating || null,
+    review_count: base.review_count || addition.review_count || null,
+    snippets: snippets.slice(0, MAX_REVIEW_SNIPPETS),
+    positive_terms: mergeTerms(base.positive_terms, addition.positive_terms).length
+      ? mergeTerms(base.positive_terms, addition.positive_terms)
+      : countTerms(reviewText, [
+          "quality", "easy", "durable", "recommend", "comfortable", "great", "excellent",
+          "qualidade", "fácil", "durável", "recomendo", "confortável", "ótimo", "excelente", "bom", "boa"
+        ]),
+    negative_terms: mergeTerms(base.negative_terms, addition.negative_terms).length
+      ? mergeTerms(base.negative_terms, addition.negative_terms)
+      : countTerms(reviewText, [
+          "small", "large", "size", "broken", "hard", "difficult", "package", "shipping", "delivery",
+          "pequeno", "grande", "tamanho", "quebrado", "difícil", "embalagem", "entrega", "ruim", "fraco"
+        ]),
+    scene_terms: mergeTerms(base.scene_terms, addition.scene_terms).length
+      ? mergeTerms(base.scene_terms, addition.scene_terms)
+      : countTerms(reviewText, [
+          "home", "office", "travel", "outdoor", "daily", "family", "work",
+          "casa", "escritório", "viagem", "rua", "dia a dia", "família", "trabalho"
+        ])
+  };
+}
+
+async function fetchSupplementalReviewInsights(url, signal) {
+  const reviewUrl = amazonReviewUrl(url);
+  if (!reviewUrl || !process.env.BRIGHTDATA_API_KEY) return null;
+  try {
+    const { response, html } = await fetchProductHtml(reviewUrl, signal);
+    if (!response.ok || isBotProtectionPage(html, response.url)) return null;
+    return extractReviewInsights(html);
+  } catch {
+    return null;
+  }
 }
 
 function cleanBrightDataScanResult(scan) {
@@ -958,6 +1069,10 @@ async function scanProductLink(url, marketHint) {
       };
     }
     const platform = detectPlatform(response.url || url, html);
+    const reviewInsights = extractReviewInsights(html);
+    const supplementalReviews = !reviewInsights || (Array.isArray(reviewInsights.snippets) && reviewInsights.snippets.length < 3)
+      ? await fetchSupplementalReviewInsights(response.url || url, controller.signal)
+      : null;
     const scan = {
       url,
       market_hint: marketHint,
@@ -971,7 +1086,7 @@ async function scanProductLink(url, marketHint) {
       description: cleanText(extractMeta(html, "description") || extractMeta(html, "og:description"), 500),
       image_candidates: extractImageCandidates(html, response.url),
       headings: extractHeadings(html),
-      review_insights: extractReviewInsights(html),
+      review_insights: mergeReviewInsights(reviewInsights, supplementalReviews),
       page_text_sample: cleanText(html, PAGE_TEXT_SAMPLE_LENGTH)
     };
     return scanner === "brightdata" ? cleanBrightDataScanResult(scan) : scan;

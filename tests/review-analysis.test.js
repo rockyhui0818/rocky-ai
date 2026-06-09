@@ -65,6 +65,106 @@ async function testNestedAndSerializedReviewsAreExtracted() {
   clearApiModule();
 }
 
+async function testAmazonReviewBoilerplateIsFiltered() {
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = "test";
+  clearApiModule();
+  const { __test } = require(path.join(root, "api/generate.js"));
+
+  const html = `
+    <html>
+      <body>
+        <span data-hook="review-title">5.0 out of 5 stars</span>
+        <span data-hook="review-body">Images in this review</span>
+        <span data-hook="review-body">There was a problem filtering reviews. Please reload the page.</span>
+        <span data-hook="review-body">Top reviews from the United States</span>
+        <span data-hook="review-body">The whitening effect was visible after a week and the strips were easy to use.</span>
+        <span data-hook="review-body">Packaging arrived crushed, which made me worry about delivery quality.</span>
+      </body>
+    </html>
+  `;
+
+  const insights = __test.extractReviewInsights(html);
+  const joined = insights.snippets.join(" ");
+
+  assert.strictEqual(insights.snippets.length, 2);
+  assert.match(joined, /whitening effect/);
+  assert.match(joined, /Packaging arrived crushed/);
+  assert(!/Images in this review|problem filtering reviews|Top reviews|out of 5 stars/i.test(joined));
+
+  if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = previousNodeEnv;
+  clearApiModule();
+}
+
+async function testAmazonReviewPageIsFetchedWhenProductPageHasOnlyReviewCount() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY,
+    BRIGHTDATA_ZONE: process.env.BRIGHTDATA_ZONE,
+    BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS
+  };
+  const previousFetch = global.fetch;
+  const calls = [];
+
+  process.env.NODE_ENV = "test";
+  process.env.BRIGHTDATA_API_KEY = "brd-test";
+  process.env.BRIGHTDATA_ZONE = "web_unlocker1";
+  process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "200";
+
+  global.fetch = async (url, options = {}) => {
+    assert.strictEqual(String(url), "https://api.brightdata.com/request");
+    const body = JSON.parse(options.body || "{}");
+    calls.push(body.url);
+    if (String(body.url).includes("/product-reviews/B0F42ZTSZZ")) {
+      return new Response(`
+        <html>
+          <body>
+            <div data-hook="review">
+              <span data-hook="review-body">I saw visible whitening in a week and it was easy to use every morning.</span>
+            </div>
+            <div data-hook="review">
+              <span data-hook="review-body">The box arrived crushed, but customer support replaced it quickly.</span>
+            </div>
+          </body>
+        </html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+    return new Response(`
+      <html>
+        <head><title>Hismile Whitening Treatment</title></head>
+        <body>
+          <span itemprop="ratingValue" content="4.4"></span>
+          <span itemprop="reviewCount" content="987"></span>
+          <div id="landingImage" data-a-dynamic-image='{"https://m.media-amazon.com/images/I/main.jpg":[1000,1000]}'></div>
+        </body>
+      </html>
+    `, { status: 200, headers: { "Content-Type": "text/html" } });
+  };
+
+  try {
+    clearApiModule();
+    const { scanProductLink } = require(path.join(root, "api/generate.js"));
+    const result = await scanProductLink(
+      "https://www.amazon.com/Hismile-Whitening-Treatment-Combining-Correction/dp/B0F42ZTSZZ?ref_=ast_sto_dp&th=1",
+      { market: "us" }
+    );
+
+    assert(
+      calls.some((url) => String(url).includes("/product-reviews/B0F42ZTSZZ")),
+      `expected Amazon review page fetch, got ${JSON.stringify(calls)}`
+    );
+    assert.strictEqual(result.review_insights.review_count, 987);
+    assert(result.review_insights.snippets.length >= 2);
+    assert.match(result.review_insights.snippets.join(" "), /visible whitening/);
+    assert.match(result.review_insights.snippets.join(" "), /box arrived crushed/);
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModule();
+  }
+}
+
 async function testReviewEvidenceIsSentToModelAnalysis() {
   const previousEnv = {
     NODE_ENV: process.env.NODE_ENV,
@@ -308,6 +408,8 @@ async function testFrontendShowsEnoughReviewEvidence() {
 
 async function run() {
   await testNestedAndSerializedReviewsAreExtracted();
+  await testAmazonReviewBoilerplateIsFiltered();
+  await testAmazonReviewPageIsFetchedWhenProductPageHasOnlyReviewCount();
   await testReviewEvidenceIsSentToModelAnalysis();
   await testRatingOnlyReviewEvidenceStillShowsConcreteStats();
   await testFrontendShowsEnoughReviewEvidence();

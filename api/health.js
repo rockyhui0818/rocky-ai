@@ -13,7 +13,7 @@ function safeHost(value) {
 }
 
 function brightDataTimeoutMs() {
-  return Math.max(Number(process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS || 90000) || 0, 90000);
+  return Math.max(Number(process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS || 120000) || 0, 120000);
 }
 
 module.exports = async function handler(req, res) {
