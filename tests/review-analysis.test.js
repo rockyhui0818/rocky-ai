@@ -165,6 +165,60 @@ async function testAmazonReviewPageIsFetchedWhenProductPageHasOnlyReviewCount() 
   }
 }
 
+async function testPlatformReviewSectionsArePreferredOverPageWideFallback() {
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = "test";
+  clearApiModule();
+  const { __test } = require(path.join(root, "api/generate.js"));
+
+  const mercadoLivreHtml = `
+    <html>
+      <body>
+        <span itemprop="ratingValue" content="4.8"></span>
+        <span itemprop="reviewCount" content="321"></span>
+        <section class="marketing-review-banner">
+          Review nossa loja oficial, aproveite cupom e frete gratis para novos clientes.
+        </section>
+        <section class="ui-review-capability">
+          <article class="ui-review-capability__comments">
+            <p class="ui-pdp-review__comment">Produto chegou rapido, embalagem bem protegida e qualidade excelente para uso diario.</p>
+            <p class="ui-pdp-review__comment">Achei facil de usar em casa, o resultado apareceu rapido e recomendo.</p>
+          </article>
+        </section>
+      </body>
+    </html>
+  `;
+
+  const shopeeHtml = `
+    <html>
+      <body>
+        <div class="site-review-strip">Review ofertas relampago com desconto progressivo para afiliados.</div>
+        <section class="product-ratings">
+          <div class="shopee-product-rating">
+            <div class="product-rating-overview">4.9 out of 5</div>
+            <div class="shopee-product-rating__content">Delivery was fast, package arrived clean, and the product worked well for travel.</div>
+          </div>
+        </section>
+      </body>
+    </html>
+  `;
+
+  const mercadoLivreInsights = __test.extractReviewInsights(mercadoLivreHtml, "mercado_livre");
+  const shopeeInsights = __test.extractReviewInsights(shopeeHtml, "shopee");
+
+  assert.strictEqual(mercadoLivreInsights.review_count, 321);
+  assert.match(mercadoLivreInsights.snippets.join(" "), /Produto chegou rapido/);
+  assert.match(mercadoLivreInsights.snippets.join(" "), /Achei facil de usar/);
+  assert(!/cupom|frete gratis/i.test(mercadoLivreInsights.snippets.join(" ")));
+
+  assert.match(shopeeInsights.snippets.join(" "), /Delivery was fast/);
+  assert(!/ofertas relampago|afiliados/i.test(shopeeInsights.snippets.join(" ")));
+
+  if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = previousNodeEnv;
+  clearApiModule();
+}
+
 async function testReviewEvidenceIsSentToModelAnalysis() {
   const previousEnv = {
     NODE_ENV: process.env.NODE_ENV,
@@ -410,6 +464,7 @@ async function run() {
   await testNestedAndSerializedReviewsAreExtracted();
   await testAmazonReviewBoilerplateIsFiltered();
   await testAmazonReviewPageIsFetchedWhenProductPageHasOnlyReviewCount();
+  await testPlatformReviewSectionsArePreferredOverPageWideFallback();
   await testReviewEvidenceIsSentToModelAnalysis();
   await testRatingOnlyReviewEvidenceStillShowsConcreteStats();
   await testFrontendShowsEnoughReviewEvidence();

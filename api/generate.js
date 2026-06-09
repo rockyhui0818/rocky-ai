@@ -91,6 +91,53 @@ const PLATFORM_SCAN_CONFIGS = [
     detail_exclude: /related|recommend|upsell|cross-sell|sponsored|ads|footer|nav/i
   }
 ];
+const PLATFORM_REVIEW_MARKERS = {
+  amazon: [
+    "cm-cr-dp-review-list",
+    "reviewsMedley",
+    "reviews-medley",
+    "customerReviews",
+    "customer-reviews",
+    "data-hook=\"review\"",
+    "data-hook='review'"
+  ],
+  mercado_livre: [
+    "ui-review-capability",
+    "ui-review-capability__comments",
+    "ui-pdp-review",
+    "ui-review",
+    "reviews-capability",
+    "opinion"
+  ],
+  shopee: [
+    "product-ratings",
+    "shopee-product-rating",
+    "product-rating-overview",
+    "rating-media-list",
+    "product-ratings__list"
+  ],
+  shopify: [
+    "judgeme_product_reviews",
+    "jdgm-review-widget",
+    "jdgm-rev",
+    "looxReviews",
+    "loox-review",
+    "yotpo-review",
+    "stamped-main-widget",
+    "stamped-review",
+    "product-reviews"
+  ],
+  generic: [
+    "reviews",
+    "review-list",
+    "product-reviews",
+    "customer-reviews",
+    "comments",
+    "comentarios",
+    "avaliacoes",
+    "avaliações"
+  ]
+};
 const IMAGE_PROMPT_SLOTS = [
   {
     sequence: 1,
@@ -487,10 +534,42 @@ function extractTaggedHtmlSections(html = "", markers = []) {
   return sections;
 }
 
+function extractMarkerWindows(html = "", markers = [], { before = 1200, after = 20000, limit = 24 } = {}) {
+  const sections = [];
+  const lower = String(html || "").toLowerCase();
+  for (const marker of markers) {
+    const needle = String(marker || "").toLowerCase();
+    if (!needle) continue;
+    let index = 0;
+    let markerMatches = 0;
+    while ((index = lower.indexOf(needle, index)) !== -1 && markerMatches < limit) {
+      const start = Math.max(0, index - before);
+      const end = Math.min(html.length, index + after);
+      sections.push(html.slice(start, end));
+      index += needle.length;
+      markerMatches += 1;
+    }
+  }
+  return sections;
+}
+
 function platformSections(html = "", markers = []) {
   const tagged = extractTaggedHtmlSections(html, markers);
   if (tagged.length) return tagged;
   return extractHtmlSections(html, markers);
+}
+
+function platformReviewSections(html = "", platformKey = "generic") {
+  const platformMarkers = PLATFORM_REVIEW_MARKERS[platformKey] || [];
+  const genericMarkers = platformKey === "generic" ? [] : PLATFORM_REVIEW_MARKERS.generic;
+  const markers = [...platformMarkers, ...genericMarkers];
+  const tagged = extractTaggedHtmlSections(html, markers);
+  if (tagged.length) return tagged.slice(0, 60);
+  const windows = extractMarkerWindows(html, markers, { before: 0, after: 20000, limit: 24 });
+  return windows
+    .map((section) => String(section || ""))
+    .filter(Boolean)
+    .slice(0, 60);
 }
 
 function isExcludedProductSection(section = "", platform = detectPlatform()) {
@@ -738,7 +817,8 @@ function extractReviewCount(html) {
   return sources[0] ? Number(String(sources[0]).replace(/[^\d]/g, "")) || null : null;
 }
 
-function extractReviewSnippets(html) {
+function extractReviewSnippets(html, options = {}) {
+  const includeTextFallback = options.includeTextFallback !== false;
   const snippets = [];
   const addSnippet = (value) => {
     if (snippets.length >= MAX_REVIEW_SNIPPETS) return;
@@ -770,7 +850,7 @@ function extractReviewSnippets(html) {
     }
   }
 
-  if (snippets.length < 3) {
+  if (includeTextFallback && snippets.length < 3) {
     const text = cleanText(html, 12000);
     const reviewLike = text
       .split(/(?<=[.!?。！？])\s+|\s{2,}/)
@@ -785,6 +865,27 @@ function extractReviewSnippets(html) {
   return snippets.slice(0, MAX_REVIEW_SNIPPETS);
 }
 
+function extractPlatformReviewSnippets(html = "", platformKey = "generic") {
+  if (!platformKey || platformKey === "generic") {
+    return extractReviewSnippets(html, { includeTextFallback: true });
+  }
+
+  const snippets = [];
+  const addSnippet = (value) => {
+    if (snippets.length >= MAX_REVIEW_SNIPPETS) return;
+    if (value && !snippets.includes(value)) snippets.push(value);
+  };
+
+  for (const section of platformReviewSections(html, platformKey)) {
+    const sectionSnippets = extractReviewSnippets(section, { includeTextFallback: true });
+    for (const snippet of sectionSnippets) addSnippet(snippet);
+    if (snippets.length >= MAX_REVIEW_SNIPPETS) break;
+  }
+
+  if (snippets.length) return snippets.slice(0, MAX_REVIEW_SNIPPETS);
+  return extractReviewSnippets(html, { includeTextFallback: true });
+}
+
 function countTerms(text, terms) {
   const lower = String(text || "").toLowerCase();
   return terms
@@ -794,8 +895,8 @@ function countTerms(text, terms) {
     .slice(0, 10);
 }
 
-function extractReviewInsights(html) {
-  const snippets = extractReviewSnippets(html);
+function extractReviewInsights(html, platformKey = "generic") {
+  const snippets = extractPlatformReviewSnippets(html, platformKey);
   const reviewText = snippets.join(" ");
   const rating = extractRating(html);
   const reviewCount = extractReviewCount(html);
@@ -1069,7 +1170,7 @@ async function scanProductLink(url, marketHint) {
       };
     }
     const platform = detectPlatform(response.url || url, html);
-    const reviewInsights = extractReviewInsights(html);
+    const reviewInsights = extractReviewInsights(html, platform.key);
     const supplementalReviews = !reviewInsights || (Array.isArray(reviewInsights.snippets) && reviewInsights.snippets.length < 3)
       ? await fetchSupplementalReviewInsights(response.url || url, controller.signal)
       : null;
