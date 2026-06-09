@@ -1549,25 +1549,6 @@ function renderReviewInsightsPanel() {
   }
 
   const hasInsight = insights && typeof insights === "object";
-  const cards = hasInsight
-    ? [
-        ["整体 Review 结论", insights.review_summary],
-        ["情绪拆分", insights.sentiment_breakdown],
-        ["客户痛点", insights.customer_pain_points],
-        ["购买阻碍", insights.purchase_barriers],
-        ["用户原话示例", insights.customer_language_examples],
-        ["高频好评点", insights.high_frequency_praise],
-        ["高频差评点", insights.high_frequency_complaints],
-        ["本土语言表达", insights.local_language],
-        ["真实使用场景", insights.usage_scenarios],
-        ["竞品弱点", insights.competitor_weaknesses],
-        ["主图提示词修饰", insights.prompt_modifiers?.main_images || insights.how_to_use],
-        ["详情页提示词修饰", insights.prompt_modifiers?.detail_pages],
-        ["不可覆盖约束", insights.prompt_modifiers?.negative_constraints],
-        ["Review 证据统计", insights.evidence_summary],
-        ["Review 分析来源", insights.source_note]
-      ]
-    : [];
 
   return `
     <section class="review-insights-panel">
@@ -1578,17 +1559,43 @@ function renderReviewInsightsPanel() {
         </div>
         <span>${scannedReviewCount ? `${scannedReviewCount} 条链接含 review 信号` : "未提取到可见评论"}</span>
       </div>
-      ${cards.length ? `
-        <div class="review-insights-grid">
-          ${cards.map(([label, value]) => `
-            <article>
-              <b>${escapeHtml(label)}</b>
-              ${renderInsightValue(value)}
-            </article>
-          `).join("")}
-        </div>
-      ` : `<p>当前模型结果没有返回 Review Insights。请确认链接页面是否有可见评分或评论摘要。</p>`}
+      ${hasInsight ? renderReviewModifierCards(insights) : `<p>当前模型结果没有返回 Review Insights。请确认链接页面是否有可见评分或评论摘要。</p>`}
     </section>
+  `;
+}
+
+function reviewModifierCardEntries(insights = {}) {
+  return [
+    ["分析方式", insights.analysis_method],
+    ["整体 Review 结论", insights.review_summary],
+    ["情绪拆分", insights.sentiment_breakdown],
+    ["客户痛点", insights.customer_pain_points],
+    ["购买阻碍", insights.purchase_barriers],
+    ["用户原话示例", insights.customer_language_examples],
+    ["高频好评点", insights.high_frequency_praise],
+    ["高频差评点", insights.high_frequency_complaints],
+    ["本土语言表达", insights.local_language],
+    ["真实使用场景", insights.usage_scenarios],
+    ["竞品弱点", insights.competitor_weaknesses],
+    ["主图提示词修饰", insights.prompt_modifiers?.main_images || insights.how_to_use],
+    ["详情页提示词修饰", insights.prompt_modifiers?.detail_pages],
+    ["不可覆盖约束", insights.prompt_modifiers?.negative_constraints],
+    ["Review 证据统计", insights.evidence_summary],
+    ["Review 分析来源", insights.source_note]
+  ];
+}
+
+function renderReviewModifierCards(insights = {}) {
+  const cards = reviewModifierCardEntries(insights);
+  return `
+    <div class="review-insights-grid">
+      ${cards.map(([label, value]) => `
+        <article>
+          <b>${escapeHtml(label)}</b>
+          ${renderInsightValue(value)}
+        </article>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -1599,20 +1606,6 @@ function renderStandaloneReviewPanel() {
   const reviewScans = scans.filter((scan) => hasReviewEvidence(scan.review_insights));
   const insights = result?.review_modifier_analysis || result?.review_insights;
   const meta = result?.review_modifier_meta || {};
-  const cards = insights && typeof insights === "object"
-    ? [
-        ["整体 Review 结论", insights.review_summary],
-        ["客户痛点", insights.customer_pain_points],
-        ["购买阻碍", insights.purchase_barriers],
-        ["高频好评点", insights.high_frequency_praise],
-        ["高频差评点", insights.high_frequency_complaints],
-        ["本土语言表达", insights.local_language],
-        ["主图提示词修饰", insights.prompt_modifiers?.main_images || insights.how_to_use],
-        ["详情页提示词修饰", insights.prompt_modifiers?.detail_pages],
-        ["Review 证据统计", insights.evidence_summary],
-        ["Review 分析来源", insights.source_note]
-      ]
-    : [];
 
   return `
     <section class="review-standalone-panel">
@@ -1637,16 +1630,7 @@ function renderStandaloneReviewPanel() {
           <div class="signal"><b>Token</b><span>${escapeHtml(String(meta.usage?.total_tokens || result.usage?.total_tokens || 0))}</span></div>
           <div class="signal"><b>用途边界</b><span>独立分析，不触发生图</span></div>
         </div>
-        ${cards.length ? `
-          <div class="review-insights-grid">
-            ${cards.map(([label, value]) => `
-              <article>
-                <b>${escapeHtml(label)}</b>
-                ${renderInsightValue(value)}
-              </article>
-            `).join("")}
-          </div>
-        ` : `<p>该次分析没有返回 Review Modifier 结构化结果。</p>`}
+        ${insights && typeof insights === "object" ? renderReviewModifierCards(insights) : `<p>该次分析没有返回 Review Modifier 结构化结果。</p>`}
         ${reviewScans.length ? `
           <h3>单独链接 Review 原始证据</h3>
           <div class="review-source-list">

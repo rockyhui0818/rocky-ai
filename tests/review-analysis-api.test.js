@@ -153,8 +153,92 @@ async function testReviewAnalysisRouteAnalyzesStandaloneLinks() {
   }
 }
 
+async function testReviewAnalysisCoercesModelTextIntoVisibleInsights() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+    OPENAI_TEXT_MODEL: process.env.OPENAI_TEXT_MODEL,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY
+  };
+  const previousFetch = global.fetch;
+
+  process.env.NODE_ENV = "test";
+  process.env.OPENAI_API_KEY = "sk-test";
+  process.env.OPENAI_BASE_URL = "http://model.example/v1";
+  process.env.OPENAI_TEXT_MODEL = "text-test";
+  delete process.env.BRIGHTDATA_API_KEY;
+
+  global.fetch = async (url) => {
+    if (String(url) === "https://reviews.example/rich-text") {
+      return new Response(`
+        <html>
+          <head><title>Rich Text Review Product</title></head>
+          <body>
+            <span itemprop="ratingValue" content="4.3"></span>
+            <span itemprop="reviewCount" content="888"></span>
+            <section class="product-reviews">
+              <p class="review-body">Great quality for daily use, easy to carry, and I recommend it.</p>
+              <p class="review-body">Package arrived broken and delivery was slow, but support replaced it.</p>
+            </section>
+          </body>
+        </html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+    if (String(url) === "http://model.example/v1/chat/completions") {
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: [
+              "整体 Review 结论：用户喜欢日常使用质量和便携性，但包装破损、物流慢会影响下单信心。",
+              "客户痛点：包装破损；配送慢；售后替换需要提前说明。",
+              "购买阻碍：担心到货损坏；担心等待时间。",
+              "主图修饰：强调 easy daily use 和 recommend。",
+              "详情页修饰：解释包装保护、售后替换、配送预期。"
+            ].join("\n")
+          }
+        }],
+        usage: { prompt_tokens: 12, completion_tokens: 18, total_tokens: 30 }
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  try {
+    clearApiModules();
+    const handler = require(path.join(root, "api/review-analysis.js"));
+    const req = createJsonRequest({
+      review_urls: ["https://reviews.example/rich-text"],
+      product: { name: "Rich Text Review Product" }
+    });
+    const res = createJsonResponse();
+
+    await handler(req, res);
+    const data = JSON.parse(res.body);
+    const analysis = data.review_modifier_analysis;
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.match(analysis.review_summary, /包装破损|物流慢|便携/);
+    assert(
+      analysis.customer_pain_points.some((item) => /包装|配送|物流|售后/.test(item)),
+      `expected concrete pain points from model text, got ${JSON.stringify(analysis.customer_pain_points)}`
+    );
+    assert(
+      analysis.prompt_modifiers.detail_pages.some((item) => /包装|售后|配送/.test(item)),
+      `expected detail-page modifiers from model text, got ${JSON.stringify(analysis.prompt_modifiers)}`
+    );
+    assert.strictEqual(analysis.evidence_summary.review_count_total, 888);
+    assert.strictEqual(analysis.source_note, "模型返回非 JSON 文本，已保留文本分析并补齐结构化字段。");
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModules();
+  }
+}
+
 async function run() {
   await testReviewAnalysisRouteAnalyzesStandaloneLinks();
+  await testReviewAnalysisCoercesModelTextIntoVisibleInsights();
 }
 
 run()

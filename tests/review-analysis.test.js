@@ -427,6 +427,18 @@ async function testRatingOnlyReviewEvidenceStillShowsConcreteStats() {
       review.prompt_modifiers.detail_pages.some((item) => /4\.7|1234/.test(item)),
       "rating-only review modifier should still provide concrete detail-page guidance"
     );
+    assert(
+      review.customer_pain_points.length >= 2,
+      `rating-only review modifier should produce concrete model-style analysis, got ${JSON.stringify(review.customer_pain_points)}`
+    );
+    assert(
+      review.purchase_barriers.length >= 2,
+      `rating-only review modifier should produce concrete purchase barriers, got ${JSON.stringify(review.purchase_barriers)}`
+    );
+    assert(
+      review.high_frequency_praise.length >= 1,
+      `rating-only review modifier should infer useful praise signals from stats, got ${JSON.stringify(review.high_frequency_praise)}`
+    );
   } finally {
     global.fetch = previousFetch;
     restoreEnv(previousEnv);
@@ -457,6 +469,14 @@ async function testFrontendShowsEnoughReviewEvidence() {
   assert(
     appSource.includes("购买阻碍"),
     "review modifier panel should show model-analyzed purchase barriers"
+  );
+  assert(
+    appSource.includes("分析方式"),
+    "review modifier panel should show whether the result came from JSON, coerced model text, or fallback analysis."
+  );
+  assert(
+    appSource.includes("renderReviewModifierCards"),
+    "review modifier cards should be rendered through a shared complete result helper."
   );
   assert(
     appSource.includes("reviewUrlInput: document.querySelector(\"#reviewUrlInput\")"),
