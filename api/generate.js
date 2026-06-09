@@ -1137,6 +1137,11 @@ function summarizeReviewEvidence(reviewEvidence = {}) {
 function fallbackReviewModifierAnalysis(reviewEvidence = {}) {
   const allEvidence = [...(reviewEvidence.us || []), ...(reviewEvidence.brazil || []), ...(reviewEvidence.other || [])];
   const summary = reviewEvidence.overall_review_data || summarizeReviewEvidence(reviewEvidence);
+  const statsText = [
+    summary.rating_average ? `平均评分 ${summary.rating_average}` : "",
+    summary.review_count_total ? `${summary.review_count_total} 条评价` : "",
+    summary.source_count ? `${summary.source_count} 个链接来源` : ""
+  ].filter(Boolean).join("，");
   const positiveTerms = [];
   const negativeTerms = [];
   const sceneTerms = [];
@@ -1151,8 +1156,8 @@ function fallbackReviewModifierAnalysis(reviewEvidence = {}) {
   return {
     analysis_method: "fallback-review-terms",
     review_summary: snippets.length
-      ? `已采集 ${summary.snippet_count || snippets.length} 条可见 review 摘要，规则降级提取好评、差评和使用场景信号。`
-      : "未采集到足够 review 原文，规则降级仅使用评分、评论数和关键词信号。",
+      ? `已采集 ${summary.snippet_count || snippets.length} 条可见 review 摘要${statsText ? `，${statsText}` : ""}，规则降级提取好评、差评和使用场景信号。`
+      : `未采集到足够 review 原文，规则降级使用${statsText || "评分、评论数和关键词信号"}生成 Review Modifier。`,
     sentiment_breakdown: {
       positive: positiveTerms.slice(0, 8),
       negative: negativeTerms.slice(0, 8),
@@ -1168,7 +1173,10 @@ function fallbackReviewModifierAnalysis(reviewEvidence = {}) {
     competitor_weaknesses: negativeTerms.slice(0, 5),
     prompt_modifiers: {
       main_images: positiveTerms.slice(0, 4).map((term) => `可在主图/副图文案中自然体现 ${term}，但不改变产品外观。`),
-      detail_pages: negativeTerms.slice(0, 4).map((term) => `在详情页提前解释 ${term} 相关疑虑，降低误解和退货。`),
+      detail_pages: [
+        statsText ? `详情页可引用 review 信号强度（${statsText}）作为卖点排序参考，但不要伪造用户原话。` : "",
+        ...negativeTerms.slice(0, 4).map((term) => `在详情页提前解释 ${term} 相关疑虑，降低误解和退货。`)
+      ].filter(Boolean),
       negative_constraints: ["Review 只能修饰卖点措辞、本土语言和差评预防，不能覆盖上传产品图、美国链接图片结构或真实产品外观。"]
     },
     evidence_summary: {

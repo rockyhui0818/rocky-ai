@@ -211,6 +211,75 @@ async function testReviewEvidenceIsSentToModelAnalysis() {
   }
 }
 
+async function testRatingOnlyReviewEvidenceStillShowsConcreteStats() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+    OPENAI_TEXT_MODEL: process.env.OPENAI_TEXT_MODEL,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY
+  };
+  const previousFetch = global.fetch;
+
+  process.env.NODE_ENV = "test";
+  process.env.OPENAI_API_KEY = "sk-test";
+  process.env.OPENAI_BASE_URL = "http://model.example/v1";
+  process.env.OPENAI_TEXT_MODEL = "text-test";
+  delete process.env.BRIGHTDATA_API_KEY;
+
+  global.fetch = async () => {
+    throw new Error("model unavailable");
+  };
+
+  try {
+    clearApiModule();
+    const { runGenerateWorkflow } = require(path.join(root, "api/generate.js"));
+    const result = await runGenerateWorkflow({
+      payload: {
+        product: {
+          name: "Rating Only Product",
+          source_urls: []
+        },
+        link_scan_results: [{
+          url: "https://www.amazon.com/example/dp/B000000002",
+          market_hint: "us",
+          ok: true,
+          title: "Rating Only Competitor",
+          image_candidates: [],
+          review_insights: {
+            rating: 4.7,
+            review_count: 1234,
+            snippets: [],
+            positive_terms: [],
+            negative_terms: [],
+            scene_terms: []
+          }
+        }]
+      },
+      token: "",
+      requestId: "review_rating_only_test"
+    });
+
+    const review = result.result.review_modifier_analysis;
+    assert.match(review.review_summary, /4\.7/);
+    assert.match(review.review_summary, /1234/);
+    assert.deepStrictEqual(review.evidence_summary, {
+      source_count: 1,
+      snippet_count: 0,
+      rating_average: 4.7,
+      review_count_total: 1234
+    });
+    assert(
+      review.prompt_modifiers.detail_pages.some((item) => /4\.7|1234/.test(item)),
+      "rating-only review modifier should still provide concrete detail-page guidance"
+    );
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModule();
+  }
+}
+
 async function testFrontendShowsEnoughReviewEvidence() {
   const fs = require("fs");
   const appSource = fs.readFileSync(path.join(root, "app.js"), "utf8");
@@ -240,6 +309,7 @@ async function testFrontendShowsEnoughReviewEvidence() {
 async function run() {
   await testNestedAndSerializedReviewsAreExtracted();
   await testReviewEvidenceIsSentToModelAnalysis();
+  await testRatingOnlyReviewEvidenceStillShowsConcreteStats();
   await testFrontendShowsEnoughReviewEvidence();
 }
 

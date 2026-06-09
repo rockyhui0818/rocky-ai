@@ -849,6 +849,13 @@ function tokenizeManualKeywords(text) {
     .slice(0, 32);
 }
 
+function extractSourceUrls(rawText) {
+  const matches = String(rawText || "").match(/https?:\/\/[^\s,，]+/gi) || [];
+  return matches
+    .map((url) => url.replace(/[)\]）】。；;，,]+$/g, ""))
+    .filter(Boolean);
+}
+
 function buildKeywordSignals(urlInfo, sellingPoints, productName) {
   const base = [
     productName,
@@ -2046,6 +2053,7 @@ function renderDetailSkeleton(pack) {
 function buildApiDraft(pack) {
   const account = getCurrentAccount();
   if (!account) return {};
+  const sourceUrls = extractSourceUrls(els.productUrl.value);
   return {
     locale: "pt-BR",
     market: "Brazil",
@@ -2064,7 +2072,7 @@ function buildApiDraft(pack) {
     image_model_id: pack.model.imageModel,
     product: {
       name: pack.productName,
-      source_urls: els.productUrl.value.split(/[\n,，]+/).map((item) => item.trim()).filter(Boolean),
+      source_urls: sourceUrls,
       source_domains: pack.urlInfo.domains,
       source_ids: pack.urlInfo.ids,
       source_markets: pack.urlInfo.links.map((link) => ({ domain: link.domain, market: link.market, platform: link.platformGuess })),
@@ -2095,7 +2103,7 @@ function buildApiDraft(pack) {
 }
 
 async function requestLocalBrowserScan(pack) {
-  const sourceUrls = els.productUrl.value.split(/[\n,，]+/).map((item) => item.trim()).filter(Boolean);
+  const sourceUrls = extractSourceUrls(els.productUrl.value);
   if (!sourceUrls.length) return null;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 26000);
@@ -2568,7 +2576,7 @@ function buildAdminApiDraft(pack) {
       units: estimateUsageUnits(pack),
       tokens: estimateTokenUsage(pack),
       success: true,
-      product_urls: els.productUrl.value.split(/[\n,，]+/).map((item) => item.trim()).filter(Boolean),
+      product_urls: extractSourceUrls(els.productUrl.value),
       created_at: "ISO-8601"
     },
     admin_endpoints: [
