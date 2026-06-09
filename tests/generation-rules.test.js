@@ -87,6 +87,24 @@ assert(
 );
 
 assert(
+  appSource.includes("platform_size") &&
+    imageSource.includes("const itemSize = item.size || item.platform_size || item.targetSpec?.apiSize || size") &&
+    imageSource.includes("size: itemSize"),
+  "Each image prompt must carry its own platform-ready output size instead of sharing one batch size."
+);
+
+assert(
+  !appSource.includes("如果目标尺寸与 API 输出尺寸不同，请按目标尺寸构图"),
+  "Image prompts must request direct platform-ready output sizes, not safe-area guidance for later resizing."
+);
+
+assert(
+  generateSource.includes("strict_section_match") &&
+    generateSource.includes("fallback_rule: \"必须优先使用同 section"),
+  "Prompt-slot evidence must enforce main slots use main-gallery images and detail slots use detail/A+ images."
+);
+
+assert(
   generateSource.includes("region-first collect, dedupe variants, then select model evidence"),
   "Backend scan scope must describe 8 main / 7 detail images as post-collection selected evidence."
 );

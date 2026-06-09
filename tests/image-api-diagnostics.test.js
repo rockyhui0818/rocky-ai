@@ -101,6 +101,45 @@ async function run() {
   assert.strictEqual(normalizedPayload.provider.model, "gpt-image-2-pro");
   assert.strictEqual(requested[0].url, "http://154.64.230.35:3000/v1/images/generations");
   assert.strictEqual(requested[0].body.model, "gpt-image-2-pro");
+
+  process.env.OPENAI_IMAGE_API_KEY = "sk-test";
+  process.env.OPENAI_IMAGE_BASE_URL = "http://154.64.230.35:3000/v1";
+  process.env.OPENAI_IMAGE_MODEL = "gpt-image-2-pro";
+  const sizedRequests = [];
+  global.fetch = async (url, options = {}) => {
+    sizedRequests.push({
+      url: String(url),
+      body: JSON.parse(options.body || "{}")
+    });
+    return new Response(JSON.stringify({ data: [{ b64_json: `ok-${sizedRequests.length}` }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+
+  clearApiModule("api/image.js");
+  const sizedHandler = require(path.join(root, "api/image.js"));
+  const sizedRes = createMockResponse();
+  await sizedHandler(createMockRequest({
+    prompt: "Marketplace images",
+    size: "1024x1024",
+    max_images: 2,
+    prompts: [
+      { type: "white_main", label: "Main", prompt: "main prompt", size: "1024x1024" },
+      { type: "detail_hero_banner", label: "Detail", prompt: "detail prompt", size: "1536x1024" }
+    ]
+  }), sizedRes);
+
+  global.fetch = previousFetch;
+  for (const [key, value] of Object.entries(previousEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+
+  assert.strictEqual(sizedRes.statusCode, 200);
+  assert.deepStrictEqual(sizedRequests.map((request) => request.body.size), ["1024x1024", "1536x1024"]);
+  const sizedPayload = JSON.parse(sizedRes.body);
+  assert.deepStrictEqual(sizedPayload.images.map((image) => image.size), ["1024x1024", "1536x1024"]);
 }
 
 run()

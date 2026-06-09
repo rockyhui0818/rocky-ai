@@ -69,9 +69,10 @@ const imageSizeProfiles = {
       canvasLabel: "Amazon A+ 详情页横幅模块",
       targetRatio: "97:60",
       recommendedPixels: "970x600 px（建议源文件 1940x1200）",
+      apiSize: "1536x1024",
       safeArea: "核心产品和文字放在中间 80% 安全区，避免移动端裁切。",
       platformRules: "适合 A+ Header/Single Image 模块；文字少而大，不放价格、折扣、夸张承诺或平台 Logo。",
-      exportNote: "API 先生成方图构图稿，设计时预留 970x600 横幅裁切区，后续可裁切为 A+ 模块尺寸。"
+      exportNote: "直接按横向详情页画布生成，可上传前按平台要求导出同等比例高清文件。"
     }
   },
   mercado: {
@@ -151,11 +152,11 @@ const imageSizeProfiles = {
     },
     detailSpec: {
       canvasLabel: "跨平台详情页模块",
-      targetRatio: "1:1 + Amazon 97:60 安全裁切",
-      recommendedPixels: "2000x2000 母版；Amazon A+ 裁切 970x600",
+      targetRatio: "1:1",
+      recommendedPixels: "2000x2000 母版；Amazon A+ 另用横向详情页尺寸",
       safeArea: "核心产品和文字放在中心 80%，确保方图与 Amazon 横幅裁切都可用。",
       platformRules: "一张图只表达一个卖点，葡语短句移动端可读，不出现虚假折扣、平台 Logo 或违规承诺。",
-      exportNote: "先生成方图详情母版；Amazon A+ 需要从中心安全区裁切为 970x600。"
+      exportNote: "按当前目标平台直接生成对应画布，不依赖二次裁切。"
     }
   }
 };
@@ -2377,7 +2378,9 @@ async function requestRemoteImage(pack) {
           ...rawImage,
           type: rawImage.type || item.type,
           label: rawImage.label || item.label,
-          targetSpec: rawImage.targetSpec || item.targetSpec || null
+          targetSpec: rawImage.targetSpec || item.targetSpec || null,
+          size: rawImage.size || item.size || item.platform_size || item.targetSpec?.apiSize || size,
+          platform_size: item.platform_size || item.size || item.targetSpec?.apiSize || size
         } : null;
         if (firstImage) images.push(firstImage);
         state.imageJobs[jobIndex] = {
@@ -2446,8 +2449,8 @@ function getImageTargetSpec(type) {
     platformKey: els.platform.value,
     platformLabel: profile.label,
     generationLabel: profile.generationLabel || profile.label,
-    apiSize: profile.apiSize || "1024x1024",
-    ...baseSpec
+    ...baseSpec,
+    apiSize: baseSpec.apiSize || profile.apiSize || "1024x1024"
   };
 }
 
@@ -2469,6 +2472,8 @@ function withTargetSpec(type, label, brief) {
     type,
     label,
     targetSpec,
+    size: targetSpec.apiSize,
+    platform_size: targetSpec.apiSize,
     prompt: `${formatSpecForPrompt(targetSpec)}\n${brief}`
   };
 }
@@ -2485,7 +2490,7 @@ function buildImagePromptQueue(pack) {
     `美国链接必须先拆主图与详情页的设计、架构、风格、色彩和表达内容；巴西链接存在时只用于本土化语言、场景和信任要素。`,
     `不得把链接里的竞品产品外观、颜色、包装、配件或材质用于改变上传产品；必须去品牌化：不出现竞品 logo、商标、品牌名、水印或可识别 IP。`,
     `每次只生成一张独立图片，不要拼图，不要四宫格。`,
-    `如果目标尺寸与 API 输出尺寸不同，请按目标尺寸构图，在 ${getSelectedImageSizeProfile().apiSize || "1024x1024"} 画布中保留可裁切安全区。`
+    `必须直接按每张图的 targetSpec.apiSize 输出平台可用尺寸，不把方图当作详情页横图或再依赖二次裁切修改。`
   ].join("\n");
   return [
     withTargetSpec(

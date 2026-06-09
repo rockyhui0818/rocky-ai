@@ -341,6 +341,7 @@ async function runImageWorkflow({ payload, token }) {
   const concurrency = normalizeImageConcurrency(process.env.OPENAI_IMAGE_CONCURRENCY);
 
   async function generateImageItem(item, index) {
+    const itemSize = item.size || item.platform_size || item.targetSpec?.apiSize || size;
     const finalPrompt = [
       String(item.prompt || prompt),
       "",
@@ -359,7 +360,7 @@ async function runImageWorkflow({ payload, token }) {
           apiKey,
           model,
           prompt: finalPrompt,
-          size,
+          size: itemSize,
           referenceImage: payload.reference_image,
           referenceImages
         });
@@ -370,7 +371,7 @@ async function runImageWorkflow({ payload, token }) {
           apiKey,
           model,
           prompt: finalPrompt,
-          size,
+          size: itemSize,
           referenceImage: payload.reference_image,
           referenceImages
         });
@@ -380,6 +381,7 @@ async function runImageWorkflow({ payload, token }) {
         type: item.type || "image",
         label: item.label || item.type || "图片",
         targetSpec: item.targetSpec || null,
+        size: itemSize,
         prompt: finalPrompt,
         ...firstImage(result.data)
       };
@@ -388,6 +390,7 @@ async function runImageWorkflow({ payload, token }) {
         type: item.type || "image",
         label: item.label || item.type || "图片",
         targetSpec: item.targetSpec || null,
+        size: itemSize,
         message: itemError.message,
         details: itemError.details || null
       });

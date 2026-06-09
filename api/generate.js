@@ -1525,6 +1525,15 @@ function imageUrlsFor(scans = [], mode, limit = 6) {
 function classifyImageCandidate(image = {}) {
   const semanticSource = `${image.src || ""} ${image.alt || ""}`.toLowerCase();
   const typeSource = String(image.type || "").toLowerCase();
+  if (typeSource === "detail-page-image") {
+    if (semanticSource.includes("faq") || semanticSource.includes("question") || semanticSource.includes("pergunta")) return "faq";
+    if (semanticSource.includes("chart") || semanticSource.includes("compare") || semanticSource.includes("comparison") || semanticSource.includes("comparativo")) return "comparison_chart";
+    if (semanticSource.includes("hero") || semanticSource.includes("banner") || semanticSource.includes("brand-story")) return "hero_banner";
+    if (semanticSource.includes("lifestyle") || semanticSource.includes("scene") || semanticSource.includes("usage") || semanticSource.includes("use") || semanticSource.includes("vida") || semanticSource.includes("uso")) return "lifestyle_usage";
+    if (semanticSource.includes("detail") || semanticSource.includes("spec") || semanticSource.includes("size") || semanticSource.includes("dimension") || semanticSource.includes("material")) return "details_specs";
+    if (semanticSource.includes("info") || semanticSource.includes("feature") || semanticSource.includes("benefit") || semanticSource.includes("aplus") || semanticSource.includes("plus") || semanticSource.includes("module")) return "core_features";
+    return "core_features";
+  }
   if (semanticSource.includes("faq") || semanticSource.includes("question") || semanticSource.includes("pergunta")) return "faq";
   if (semanticSource.includes("chart") || semanticSource.includes("compare") || semanticSource.includes("comparison") || semanticSource.includes("comparativo")) return "comparison_chart";
   if (semanticSource.includes("hero") || semanticSource.includes("banner") || semanticSource.includes("brand-story")) return "hero_banner";
@@ -1533,7 +1542,6 @@ function classifyImageCandidate(image = {}) {
   if (semanticSource.includes("detail") || semanticSource.includes("spec") || semanticSource.includes("size") || semanticSource.includes("dimension") || semanticSource.includes("material")) return "details_specs";
   if (semanticSource.includes("white") || semanticSource.includes("main") || semanticSource.includes("primary") || semanticSource.includes("principal")) return "white_main";
   if (typeSource === "main-image") return "white_main";
-  if (typeSource === "detail-page-image") return "supporting";
   return "supporting";
 }
 
@@ -1565,6 +1573,7 @@ function unitMatchesSlot(unit = {}, analysis = {}, slot = {}) {
 }
 
 function scoreUnitForSlot(unit = {}, analysis = {}, slot = {}, market = "") {
+  if (unit.section !== slot.section) return -999;
   let score = 0;
   if (unit.market === market) score += 20;
   if (unit.section === slot.section) score += 12;
@@ -1597,13 +1606,12 @@ function compactImageAnalysis(analysis = {}) {
 
 function chooseUnitForSlot(imageUnits = [], analyses = {}, slot = {}, market = "us") {
   const candidates = imageUnits
-    .filter((unit) => unit.market === market)
+    .filter((unit) => unit.market === market && unit.section === slot.section)
     .map((unit) => ({
       unit,
       analysis: analyses[unit.id] || {},
       score: scoreUnitForSlot(unit, analyses[unit.id] || {}, slot, market)
     }))
-    .filter((item) => item.unit.section === slot.section || item.score >= 22)
     .sort((a, b) => b.score - a.score);
   return candidates[0] || null;
 }
@@ -1647,7 +1655,8 @@ function buildPromptSlotEvidence(imageUnits = [], analyses = {}, reviewModifierA
         analysis: compactImageAnalysis(br.analysis)
       } : null,
       review_modifier: Array.isArray(reviewLayer) ? reviewLayer.slice(0, 3) : [],
-      fallback_rule: "如果某一侧没有对应图片证据，使用同市场同 section 最接近的图片分析；仍缺失时使用平台标准结构，但必须标明证据不足。"
+      strict_section_match: true,
+      fallback_rule: "必须优先使用同 section 的采集图片：主图槽位只用主图库图片，详情页槽位只用详情页/A+图片；仍缺失时使用平台标准结构并标明证据不足，禁止用主图库图片冒充详情页图片。"
     };
   });
 }
@@ -1661,6 +1670,7 @@ function compactSlotEvidenceForModel(promptSlotEvidence = []) {
     us: slot.us_source ? {
       unit_id: slot.us_source.unit_id,
       image_role: slot.us_source.analysis?.image_role || slot.us_source.inferred_type,
+      source_area: slot.us_source.source_area,
       source_position: slot.us_source.source_position,
       position_confidence: slot.us_source.position_confidence,
       layout: slot.us_source.analysis?.layout || "",
@@ -1673,6 +1683,7 @@ function compactSlotEvidenceForModel(promptSlotEvidence = []) {
     br: slot.brazil_source ? {
       unit_id: slot.brazil_source.unit_id,
       image_role: slot.brazil_source.analysis?.image_role || slot.brazil_source.inferred_type,
+      source_area: slot.brazil_source.source_area,
       source_position: slot.brazil_source.source_position,
       position_confidence: slot.brazil_source.position_confidence,
       layout: slot.brazil_source.analysis?.layout || "",
@@ -1914,7 +1925,11 @@ function normalizeSynthesisPromptSlots(result = {}, promptSlotEvidence = []) {
       label: slot.label,
       source_logic: cleanText(modelItem.source_logic || fallback.source_logic, 420),
       us_source_unit: modelItem.us_source_unit || fallback.us_source_unit || evidence.us_source?.unit_id || null,
+      us_source_area: evidence.us_source?.source_area || null,
+      us_source_position: evidence.us_source?.source_position || null,
       brazil_source_unit: modelItem.brazil_source_unit || fallback.brazil_source_unit || evidence.brazil_source?.unit_id || null,
+      brazil_source_area: evidence.brazil_source?.source_area || null,
+      brazil_source_position: evidence.brazil_source?.source_position || null,
       br_localization: cleanText(modelItem.br_localization || fallback.br_localization, 320),
       review_modifier: Array.isArray(modelItem.review_modifier)
         ? modelItem.review_modifier.slice(0, 4)
@@ -2629,6 +2644,7 @@ module.exports.scanProductLink = scanProductLink;
 module.exports.scanProductLinks = scanProductLinks;
 if (process.env.NODE_ENV === "test") {
   module.exports.__test = {
-    extractReviewInsights
+    extractReviewInsights,
+    buildPromptSlotEvidence
   };
 }
