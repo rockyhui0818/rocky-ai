@@ -1615,7 +1615,7 @@ function renderScanEvidenceItem(scan) {
   const scanStatus = scan.ok ? `扫描成功 · ${scannerLabel}` : (scan.error === "LINK_SCAN_BLOCKED" ? "平台风控拦截，未读到真实商品页" : escapeHtml(scan.error || "扫描失败"));
   const scope = scan.scan_scope || {};
   const scopeText = scope.mode === "brightdata-full-evidence"
-    ? `完整采集标题、描述、主图 ${scope.main_image_count || 0} 张、详情页图片 ${scope.detail_page_image_count || 0} 张、页面正文样本和 Review 信息；已屏蔽导航/广告/菜单/页脚等无关内容。`
+    ? `按页面区域采集标题、描述、主图库候选、A+/详情页候选、页面正文样本和 Review 信息；去重筛选后入模主图 ${scope.main_image_count || 0} 张、A+/详情图 ${scope.detail_page_image_count || 0} 张；已屏蔽导航/广告/菜单/页脚/推荐区等无关内容。`
     : scope.mode === "brightdata-useful-only"
       ? `只采集主图 ${scope.main_image_count || 0} 张、详情页图片 ${scope.detail_page_image_count || 0} 张、Review 信息；已屏蔽导航/广告/菜单/页脚/整页正文。`
     : "";

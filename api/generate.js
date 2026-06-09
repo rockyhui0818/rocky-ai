@@ -22,6 +22,8 @@ const REVIEW_ANALYSIS_BUDGET_TOKENS = 900;
 const BRIGHTDATA_API_URL = "https://api.brightdata.com/request";
 const USEFUL_IMAGE_TYPES = new Set(["main-image", "detail-page-image"]);
 const MIN_PRODUCTION_BRIGHTDATA_TIMEOUT_MS = 90000;
+const MAX_RAW_MAIN_IMAGE_CANDIDATES = 80;
+const MAX_RAW_DETAIL_IMAGE_CANDIDATES = 120;
 const LISTING_IMAGE_TYPES = [
   "white_main",
   "lifestyle",
@@ -214,6 +216,46 @@ function cleanImageUrl(src = "") {
     .trim();
 }
 
+function imageDedupeKey(src = "") {
+  let value = cleanImageUrl(src).toLowerCase();
+  try {
+    const parsed = new URL(value);
+    parsed.search = "";
+    parsed.hash = "";
+    value = parsed.href;
+  } catch {
+    value = value.split(/[?#]/)[0];
+  }
+  return value
+    .replace(/(?:\._[^./]+_\.)/g, ".")
+    .replace(/(?:__[^/]*?__)/g, "__")
+    .replace(/(?:PT\d+_)?(?:SX|SY|SL|US|SS)\d+_V\d+/gi, "")
+    .replace(/_(?:AC_)?(?:SX|SY|SL|US|SS)\d+(?=[_.])/gi, "")
+    .replace(/_V\d+(?=[_.])/gi, "")
+    .replace(/_{2,}/g, "_")
+    .replace(/\._+\./g, ".")
+    .replace(/__+/g, "__");
+}
+
+function imageQualityScore(src = "") {
+  const value = cleanImageUrl(src);
+  const numbers = Array.from(value.matchAll(/(?:SL|SX|SY|US|SS|PT|_)(\d{2,4})(?=[_.])/gi))
+    .map((match) => Number(match[1]))
+    .filter(Number.isFinite);
+  const largest = numbers.length ? Math.max(...numbers) : 0;
+  const libraryBoost = /aplus-media-library-service-media|media-library/i.test(value) ? 500 : 0;
+  const fullSizeBoost = /SL1[0-9]{3}|SX1[0-9]{3}|SY1[0-9]{3}/i.test(value) ? 300 : 0;
+  return largest + libraryBoost + fullSizeBoost;
+}
+
+function imageSelectionScore(image = {}) {
+  return Number(image.score || 0) * 10000 + imageQualityScore(image.src);
+}
+
+function imageVariantScore(image = {}) {
+  return imageQualityScore(image.src) * 10000 + Number(image.score || 0);
+}
+
 function extractDynamicImageUrls(value = "") {
   const source = decodeHtmlEntities(value).replace(/\\\//g, "/").replace(/\\u0026/g, "&").trim();
   const urls = [];
@@ -338,6 +380,17 @@ function extractHtmlSections(html, markers = []) {
     .map((item) => item.section);
 }
 
+function isUsefulDetailSection(marker = "", section = "") {
+  const markerText = String(marker || "").toLowerCase();
+  const sectionText = String(section || "").toLowerCase();
+  if (/sp_detail|sponsored|recommend|also-bought|similarities|desktop-dp-sims|purchase-sims/.test(sectionText)) return false;
+  if (/aplus|a-plus|dpx-aplus|productdescription|product-description/.test(markerText)) return true;
+  if (/detail-bullets|feature-bullets/.test(markerText)) {
+    return /aplus|a-plus|productdescription|product-description|from the manufacturer|product details/i.test(section);
+  }
+  return false;
+}
+
 function imagePositionLabel({ area, index, role }) {
   const areaLabel = area === "detail" ? "详情页/A+模块" : "主图图库";
   const roleLabel = role ? ` · ${role}` : "";
@@ -347,6 +400,8 @@ function imagePositionLabel({ area, index, role }) {
 function enrichImageCandidate(candidate, { area, index, role, sourceMarker, confidence }) {
   return {
     ...candidate,
+    dedupe_key: imageDedupeKey(candidate.src),
+    quality_score: imageQualityScore(candidate.src),
     source_area: area,
     position_index: index,
     source_position: imagePositionLabel({ area, index, role }),
@@ -384,13 +439,14 @@ function extractImageCandidates(html, baseUrl) {
   };
   for (const block of dynamicImageBlocks.slice(0, 12)) {
     const urls = extractDynamicImageUrls(block[2]);
-    for (const src of urls.slice(0, MAX_MAIN_IMAGE_CANDIDATES)) {
+    for (const src of urls.slice(0, MAX_RAW_MAIN_IMAGE_CANDIDATES)) {
       addMainGalleryImage(src, "data-a-dynamic-image", "high");
     }
   }
-  for (const src of extractAmazonCarouselGalleryUrls(html).slice(0, MAX_MAIN_IMAGE_CANDIDATES)) {
+  for (const src of extractAmazonCarouselGalleryUrls(html).slice(0, MAX_RAW_MAIN_IMAGE_CANDIDATES)) {
     const cleanSrc = cleanImageUrl(src);
-    if (!cleanSrc || candidates.some((item) => cleanImageUrl(item.src) === cleanSrc)) continue;
+    const key = imageDedupeKey(cleanSrc);
+    if (!cleanSrc || candidates.some((item) => item.dedupe_key === key)) continue;
     addMainGalleryImage(cleanSrc, "colorImages.initial", "high");
   }
 
@@ -405,17 +461,14 @@ function extractImageCandidates(html, baseUrl) {
   ];
   const detailSections = detailMarkers.flatMap((marker) =>
     extractHtmlSections(html, [marker]).map((section) => ({ marker, section }))
-  );
+  ).filter(({ marker, section }) => isUsefulDetailSection(marker, section));
   let detailIndex = 0;
-  const detailSeen = new Set();
   for (const { marker, section } of detailSections) {
     const sectionImages = extractImageUrlsFromHtml(section)
       .map((src) => cleanImageUrl(src))
       .filter((src) => src && !isNonProductImage(src) && isLikelyDetailImage(src) && !isLowQualityDetailVariant(src));
     let addedFromSection = 0;
     for (const src of sectionImages) {
-      if (detailSeen.has(src)) continue;
-      detailSeen.add(src);
       detailIndex += 1;
       addedFromSection += 1;
       const baseCandidate = {
@@ -434,31 +487,62 @@ function extractImageCandidates(html, baseUrl) {
           confidence: "medium"
         }
       ));
-      if (addedFromSection >= 24) break;
+      if (addedFromSection >= MAX_RAW_DETAIL_IMAGE_CANDIDATES) break;
     }
   }
 
-  const unique = new Map();
-  for (const item of candidates) {
-    if (!USEFUL_IMAGE_TYPES.has(item.type)) continue;
-    if (!unique.has(item.src)) {
-      unique.set(item.src, item);
-    } else {
-      const existing = unique.get(item.src);
-      if ((item.position_confidence === "high" && existing.position_confidence !== "high") || Number(item.score || 0) > Number(existing.score || 0)) {
-        unique.set(item.src, { ...existing, ...item });
-      }
+  return selectImageEvidence(candidates);
+}
+
+function dedupeImagesBySource(images = []) {
+  const grouped = new Map();
+  for (const image of images) {
+    if (!USEFUL_IMAGE_TYPES.has(image.type) || !image.src || isNonProductImage(image.src)) continue;
+    const key = image.dedupe_key || imageDedupeKey(image.src);
+    if (!key) continue;
+    const normalized = {
+      ...image,
+      dedupe_key: key,
+      quality_score: image.quality_score || imageQualityScore(image.src)
+    };
+    const existing = grouped.get(key);
+    if (!existing || imageVariantScore(normalized) > imageVariantScore(existing)) {
+      grouped.set(key, existing ? { ...existing, ...normalized } : normalized);
     }
   }
-  const uniqueValues = Array.from(unique.values());
-  const mainImages = uniqueValues
-    .filter((item) => item.type === "main-image")
-    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
-    .slice(0, MAX_MAIN_IMAGE_CANDIDATES);
-  const detailImages = uniqueValues
-    .filter((item) => item.type === "detail-page-image")
-    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
-    .slice(0, MAX_DETAIL_IMAGE_CANDIDATES);
+  return Array.from(grouped.values());
+}
+
+function renumberImagePositions(images = [], area) {
+  return images.map((image, index) => {
+    const positionIndex = index + 1;
+    const role = image.inferred_role || image.role || classifyImageCandidate(image);
+    return {
+      ...image,
+      source_area: area,
+      position_index: positionIndex,
+      source_position: imagePositionLabel({ area, index: positionIndex, role }),
+      inferred_role: role
+    };
+  });
+}
+
+function selectImageEvidence(images = []) {
+  const uniqueValues = dedupeImagesBySource(images);
+  const mainImages = renumberImagePositions(
+    uniqueValues
+      .filter((item) => item.type === "main-image")
+      .sort((a, b) => Number(a.position_index || 999) - Number(b.position_index || 999) || imageSelectionScore(b) - imageSelectionScore(a))
+      .slice(0, MAX_MAIN_IMAGE_CANDIDATES),
+    "main"
+  );
+  const detailImages = renumberImagePositions(
+    uniqueValues
+      .filter((item) => item.type === "detail-page-image")
+      .sort((a, b) => Number(a.position_index || 999) - Number(b.position_index || 999) || imageSelectionScore(b) - imageSelectionScore(a))
+      .slice(0, MAX_DETAIL_IMAGE_CANDIDATES),
+    "detail"
+  );
   return [...mainImages, ...detailImages].slice(0, MAX_IMAGE_CANDIDATES);
 }
 
@@ -610,23 +694,15 @@ function extractReviewInsights(html) {
 }
 
 function cleanBrightDataScanResult(scan) {
-  const allUsefulImages = Array.isArray(scan.image_candidates)
-    ? scan.image_candidates.filter((image) => USEFUL_IMAGE_TYPES.has(image.type) && image.src && !isNonProductImage(image.src))
-    : [];
-  const mainImages = allUsefulImages
-    .filter((image) => image.type === "main-image")
-    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
-    .slice(0, MAX_MAIN_IMAGE_CANDIDATES);
-  const detailImages = allUsefulImages
-    .filter((image) => image.type === "detail-page-image")
-    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
-    .slice(0, MAX_DETAIL_IMAGE_CANDIDATES);
+  const selectedImages = selectImageEvidence(Array.isArray(scan.image_candidates) ? scan.image_candidates : []);
+  const mainImages = selectedImages.filter((image) => image.type === "main-image");
+  const detailImages = selectedImages.filter((image) => image.type === "detail-page-image");
   const usefulHeadings = scan.title
     ? [{ level: 1, text: scan.title }]
     : [];
   return {
     ...scan,
-    image_candidates: [...mainImages, ...detailImages],
+    image_candidates: selectedImages,
     headings: usefulHeadings,
     page_text_sample: cleanText(scan.page_text_sample, PAGE_TEXT_SAMPLE_LENGTH),
     description: cleanText(scan.description, 700),
@@ -637,7 +713,8 @@ function cleanBrightDataScanResult(scan) {
 function brightDataScanScope(mainImageCount = 0, detailImageCount = 0) {
   return {
     mode: "brightdata-full-evidence",
-    collected: ["title", "description", "main_images", "detail_page_images", "review_insights", "page_text_sample"],
+    collected: ["title", "description", "main_gallery_candidates", "detail_page_candidates", "review_insights", "page_text_sample"],
+    selection_strategy: "region-first collect, dedupe variants, then select model evidence",
     main_image_count: mainImageCount,
     detail_page_image_count: detailImageCount,
     ignored: ["navigation", "ads", "menus", "footer", "unrelated_images"]
@@ -845,6 +922,8 @@ function compactScanResult(item = {}) {
           src: image.src,
           alt: cleanText(image.alt, 120),
           score: image.score,
+          dedupe_key: image.dedupe_key || imageDedupeKey(image.src),
+          quality_score: image.quality_score || imageQualityScore(image.src),
           source_area: image.source_area || null,
           source_position: image.source_position || null,
           position_index: image.position_index || null,

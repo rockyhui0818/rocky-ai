@@ -85,6 +85,16 @@ assert(
   "Frontend remote prompt queue must cap model prompts at exactly 11 image jobs."
 );
 
+assert(
+  generateSource.includes("region-first collect, dedupe variants, then select model evidence"),
+  "Backend scan scope must describe 8 main / 7 detail images as post-collection selected evidence."
+);
+
+assert(
+  appSource.includes("按页面区域采集标题、描述、主图库候选、A+/详情页候选"),
+  "Frontend scan evidence must explain that image candidates are collected by page region before selection."
+);
+
 assert.strictEqual(
   countImageQueueEntries(appSource),
   11,
