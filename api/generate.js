@@ -927,6 +927,14 @@ function extractReviewInsights(html, platformKey = "generic") {
   };
 }
 
+function shouldFetchSupplementalReviewInsights(reviewInsights = null, platformKey = "generic") {
+  const snippetCount = Array.isArray(reviewInsights?.snippets) ? reviewInsights.snippets.length : 0;
+  const reviewCount = Number(reviewInsights?.review_count || 0);
+  if (!reviewInsights) return true;
+  if (platformKey === "amazon" && reviewCount >= 20 && snippetCount < MAX_REVIEW_SNIPPETS) return true;
+  return snippetCount < 3;
+}
+
 function extractAmazonAsin(url = "") {
   const text = String(url || "");
   const patterns = [
@@ -1202,7 +1210,7 @@ async function scanProductLink(url, marketHint) {
     }
     const platform = detectPlatform(response.url || url, html);
     const reviewInsights = extractReviewInsights(html, platform.key);
-    const supplementalReviews = !reviewInsights || (Array.isArray(reviewInsights.snippets) && reviewInsights.snippets.length < 3)
+    const supplementalReviews = shouldFetchSupplementalReviewInsights(reviewInsights, platform.key)
       ? await fetchSupplementalReviewInsights(response.url || url, controller.signal)
       : null;
     const scan = {

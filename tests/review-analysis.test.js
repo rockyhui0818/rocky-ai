@@ -356,6 +356,101 @@ async function testAmazonPositiveReviewPagesFeedHighQualitySellingPoints() {
   }
 }
 
+async function testAmazonReviewPagesAreFetchedEvenWhenProductPageHasFewSnippets() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY,
+    BRIGHTDATA_ZONE: process.env.BRIGHTDATA_ZONE,
+    BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS
+  };
+  const previousFetch = global.fetch;
+  const calls = [];
+
+  process.env.NODE_ENV = "test";
+  process.env.BRIGHTDATA_API_KEY = "brd-test";
+  process.env.BRIGHTDATA_ZONE = "web_unlocker1";
+  process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "200";
+
+  global.fetch = async (url, options = {}) => {
+    assert.strictEqual(String(url), "https://api.brightdata.com/request");
+    const body = JSON.parse(options.body || "{}");
+    calls.push(body.url);
+    const target = String(body.url);
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ") && target.includes("filterByStar=critical")) {
+      return new Response(`
+        <html>
+          <body>
+            <div data-hook="review"><span data-hook="review-body">Results faded quickly and the strips slipped during use.</span></div>
+            <div data-hook="review"><span data-hook="review-body">The package arrived crushed and I worried the strips were dry.</span></div>
+          </body>
+        </html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ") && target.includes("filterByStar=positive")) {
+      return new Response(`
+        <html>
+          <body>
+            <div data-hook="review"><span data-hook="review-body">Great for a quick event and easy to add into my whitening routine.</span></div>
+          </body>
+        </html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ")) {
+      return new Response(`
+        <html>
+          <body>
+            <div data-hook="review"><span data-hook="review-body">Easy to use before an event and the taste was mild.</span></div>
+          </body>
+        </html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    return new Response(`
+      <html>
+        <head><title>Hismile Whitening Treatment</title></head>
+        <body>
+          <span itemprop="ratingValue" content="3.8"></span>
+          <span itemprop="reviewCount" content="2470"></span>
+          <div id="landingImage" data-a-dynamic-image='{"https://m.media-amazon.com/images/I/main.jpg":[1000,1000]}'></div>
+          <div id="cm-cr-dp-review-list">
+            <span data-hook="review-body">Not permanent results but great for an event or routine use.</span>
+            <span data-hook="review-body">Easy to use and mild flavor.</span>
+            <span data-hook="review-body">Size of the pack was confusing.</span>
+            <span data-hook="review-body">Shipping was slower than expected.</span>
+          </div>
+        </body>
+      </html>
+    `, { status: 200, headers: { "Content-Type": "text/html" } });
+  };
+
+  try {
+    clearApiModule();
+    const { scanProductLink } = require(path.join(root, "api/generate.js"));
+    const result = await scanProductLink(
+      "https://www.amazon.com/Hismile-Whitening-Treatment-Combining-Correction/dp/B0F42ZTSZZ?ref_=ast_sto_dp&th=1",
+      { market: "us" }
+    );
+
+    assert(
+      calls.some((url) => String(url).includes("filterByStar=critical")) &&
+        calls.some((url) => String(url).includes("filterByStar=positive")),
+      `expected supplemental Amazon review pages despite product-page snippets, got ${JSON.stringify(calls)}`
+    );
+    const joined = result.review_insights.snippets.join(" ");
+    assert.match(joined, /Results faded quickly/);
+    assert.match(joined, /package arrived crushed/);
+    assert.match(joined, /quick event/);
+    assert(result.review_insights.snippets.length > 4);
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModule();
+  }
+}
+
 async function testPlatformReviewSectionsArePreferredOverPageWideFallback() {
   const previousNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = "test";
@@ -703,6 +798,7 @@ async function run() {
   await testAmazonReviewPageIsFetchedWhenProductPageHasOnlyReviewCount();
   await testAmazonNegativeReviewPagesArePrioritized();
   await testAmazonPositiveReviewPagesFeedHighQualitySellingPoints();
+  await testAmazonReviewPagesAreFetchedEvenWhenProductPageHasFewSnippets();
   await testPlatformReviewSectionsArePreferredOverPageWideFallback();
   await testReviewEvidenceIsSentToModelAnalysis();
   await testRatingOnlyReviewEvidenceStillShowsConcreteStats();
