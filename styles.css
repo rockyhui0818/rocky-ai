@@ -724,6 +724,26 @@ button:disabled {
   border-style: dashed;
 }
 
+.review-standalone-panel {
+  border: 1px solid rgba(124, 58, 237, 0.22);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 16px;
+  margin: 16px 0 18px;
+}
+
+.review-standalone-panel label {
+  margin-top: 14px;
+}
+
+.review-standalone-panel .control-row {
+  margin-top: 12px;
+}
+
+.review-standalone-panel .review-insights-heading span {
+  max-width: 360px;
+  white-space: normal;
+}
+
 .review-insights-heading {
   display: flex;
   justify-content: space-between;

@@ -2354,6 +2354,97 @@ async function runGenerateWorkflow({ payload, token = "", requestId = `gen_${Dat
   };
 }
 
+async function runReviewAnalysisWorkflow({ payload = {}, requestId = `review_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}` }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  const baseUrl = (process.env.OPENAI_BASE_URL || "http://154.64.230.35:3000/v1").replace(/\/$/, "");
+  const model = process.env.OPENAI_TEXT_MODEL || "gpt-5.5";
+  const urls = [
+    ...(Array.isArray(payload.review_urls) ? payload.review_urls : []),
+    ...(Array.isArray(payload.urls) ? payload.urls : [])
+  ].filter(Boolean).slice(0, MAX_SCAN_LINKS);
+  const markets = Array.isArray(payload.review_markets) ? payload.review_markets : [];
+  const startedAt = Date.now();
+  const logReviewAnalysis = (event, extra = {}) => {
+    console.log(JSON.stringify({
+      event,
+      request_id: requestId,
+      elapsed_ms: Date.now() - startedAt,
+      ...extra
+    }));
+  };
+
+  if (!apiKey) {
+    const error = new Error("Set OPENAI_API_KEY in your deployment environment.");
+    error.code = "OPENAI_API_KEY_MISSING";
+    throw error;
+  }
+  if (!urls.length) {
+    const error = new Error("请至少填写一个 review 链接。");
+    error.code = "REVIEW_URLS_REQUIRED";
+    error.statusCode = 400;
+    throw error;
+  }
+
+  logReviewAnalysis("review_analysis_start", { review_url_count: urls.length });
+  const linkScanResults = await Promise.all(urls.map((url, index) => scanProductLink(url, markets[index] || null)));
+  const reviewEvidence = buildReviewModifierEvidence(linkScanResults);
+  let reviewModifierAnalysis = fallbackReviewModifierAnalysis(reviewEvidence);
+  let reviewModifierMeta = {
+    usage: null,
+    reasoning_effort: "fallback",
+    max_tokens: 0
+  };
+  const hasEvidence = [...reviewEvidence.us, ...reviewEvidence.brazil, ...reviewEvidence.other].length > 0;
+
+  if (hasEvidence) {
+    try {
+      const reviewResult = await runJsonTask({
+        baseUrl,
+        apiKey,
+        model,
+        prompt: buildReviewModifierPrompt({
+          reviewEvidence,
+          product: {
+            name: payload.product?.name || payload.product_name || "Standalone Review Analysis",
+            selling_points: payload.product?.selling_points || payload.selling_points || ""
+          }
+        }),
+        maxTokens: REVIEW_ANALYSIS_BUDGET_TOKENS,
+        imageUrls: []
+      });
+      reviewModifierAnalysis = reviewResult.result;
+      reviewModifierMeta = {
+        usage: reviewResult.usage,
+        reasoning_effort: reviewResult.reasoning_effort,
+        max_tokens: reviewResult.max_tokens
+      };
+    } catch (error) {
+      reviewModifierAnalysis = {
+        ...reviewModifierAnalysis,
+        error: cleanText(error.message, 220),
+        source_note: `${reviewModifierAnalysis.source_note || ""} Review 模型分析失败，已使用规则降级结果。`
+      };
+    }
+  }
+
+  logReviewAnalysis("review_analysis_complete", {
+    scan_count: linkScanResults.length,
+    evidence_source_count: reviewEvidence.overall_review_data?.source_count || 0,
+    total_tokens: Number(reviewModifierMeta.usage?.total_tokens || 0)
+  });
+
+  return {
+    ok: true,
+    model,
+    link_scan_results: linkScanResults.map(compactScanResult),
+    review_evidence: reviewEvidence,
+    review_modifier_analysis: reviewModifierAnalysis,
+    review_modifier_meta: reviewModifierMeta,
+    review_insights: reviewModifierAnalysis,
+    usage: reviewModifierMeta.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+  };
+}
+
 function buildSystemPrompt() {
   return [
     "You are VISION BRZAZIL's fast ecommerce link-analysis engine.",
@@ -2443,6 +2534,7 @@ module.exports = async function handler(req, res) {
 };
 
 module.exports.runGenerateWorkflow = runGenerateWorkflow;
+module.exports.runReviewAnalysisWorkflow = runReviewAnalysisWorkflow;
 module.exports.scanProductLink = scanProductLink;
 module.exports.scanProductLinks = scanProductLinks;
 if (process.env.NODE_ENV === "test") {

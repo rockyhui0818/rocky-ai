@@ -458,6 +458,22 @@ async function testFrontendShowsEnoughReviewEvidence() {
     appSource.includes("购买阻碍"),
     "review modifier panel should show model-analyzed purchase barriers"
   );
+  assert(
+    appSource.includes("reviewUrlInput: document.querySelector(\"#reviewUrlInput\")"),
+    "review page should expose a standalone review URL input."
+  );
+  assert(
+    appSource.includes("analyzeReviewBtn: document.querySelector(\"#analyzeReviewBtn\")"),
+    "review page should expose a standalone review analysis button."
+  );
+  assert(
+    appSource.includes("apiRequest(\"/api/review-analysis\""),
+    "frontend should call the standalone review analysis API."
+  );
+  assert(
+    appSource.includes("state.standaloneReviewResult"),
+    "standalone review analysis must keep results separate from the main generation workflow."
+  );
 }
 
 async function run() {

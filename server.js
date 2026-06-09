@@ -10,6 +10,7 @@ const handlers = {
   "/api/generate": require("./api/generate"),
   "/api/generate-job": require("./api/generate-job"),
   "/api/generate-status": require("./api/generate-status"),
+  "/api/review-analysis": require("./api/review-analysis"),
   "/api/image": require("./api/image"),
   "/api/image-job": require("./api/image-job"),
   "/api/usage": require("./api/usage"),

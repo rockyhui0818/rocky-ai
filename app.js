@@ -301,6 +301,10 @@ const state = {
   latestPrompt: "",
   latestRemoteResult: null,
   latestRemoteStatus: "",
+  standaloneReviewResult: null,
+  standaloneReviewStatus: "",
+  standaloneReviewUrls: "",
+  isReviewBusy: false,
   latestImageResult: null,
   latestImageStatus: "",
   imageJobs: [],
@@ -334,6 +338,7 @@ const els = {
   uploadZone: document.querySelector("#uploadZone"),
   previewStrip: document.querySelector("#previewStrip"),
   productUrl: document.querySelector("#productUrl"),
+  reviewUrlInput: document.querySelector("#reviewUrlInput"),
   productName: document.querySelector("#productName"),
   platform: document.querySelector("#platform"),
   modelProvider: document.querySelector("#modelProvider"),
@@ -342,6 +347,7 @@ const els = {
   customImagePrompt: document.querySelector("#customImagePrompt"),
   customDetailPrompt: document.querySelector("#customDetailPrompt"),
   generateBtn: document.querySelector("#generateBtn"),
+  analyzeReviewBtn: document.querySelector("#analyzeReviewBtn"),
   saveDraftBtn: document.querySelector("#saveDraftBtn"),
   loadDraftBtn: document.querySelector("#loadDraftBtn"),
   copyBtn: document.querySelector("#copyBtn"),
@@ -1118,6 +1124,7 @@ function renderOutputs() {
   `;
 
   els.reviewOutput.innerHTML = renderReviewAnalysisPage();
+  bindReviewAnalysisControls();
 
   els.imageOutput.innerHTML = `
     <h2>图片生成提示词</h2>
@@ -1585,6 +1592,72 @@ function renderReviewInsightsPanel() {
   `;
 }
 
+function renderStandaloneReviewPanel() {
+  const result = state.standaloneReviewResult;
+  const status = state.standaloneReviewStatus || "可以单独粘贴评论页或商品页链接，只分析 Review Modifier，不触发 11 张生图。";
+  const scans = Array.isArray(result?.link_scan_results) ? result.link_scan_results : [];
+  const reviewScans = scans.filter((scan) => hasReviewEvidence(scan.review_insights));
+  const insights = result?.review_modifier_analysis || result?.review_insights;
+  const meta = result?.review_modifier_meta || {};
+  const cards = insights && typeof insights === "object"
+    ? [
+        ["整体 Review 结论", insights.review_summary],
+        ["客户痛点", insights.customer_pain_points],
+        ["购买阻碍", insights.purchase_barriers],
+        ["高频好评点", insights.high_frequency_praise],
+        ["高频差评点", insights.high_frequency_complaints],
+        ["本土语言表达", insights.local_language],
+        ["主图提示词修饰", insights.prompt_modifiers?.main_images || insights.how_to_use],
+        ["详情页提示词修饰", insights.prompt_modifiers?.detail_pages],
+        ["Review 证据统计", insights.evidence_summary],
+        ["Review 分析来源", insights.source_note]
+      ]
+    : [];
+
+  return `
+    <section class="review-standalone-panel">
+      <div class="review-insights-heading">
+        <div>
+          <h3>单独 Review Modifier</h3>
+          <p>添加单独链接进行 review 分析，结果只用于查看评论洞察，不会覆盖链接拆解或图片生成任务。</p>
+        </div>
+        <span>${escapeHtml(status)}</span>
+      </div>
+      <label>
+        Review 分析链接
+        <textarea id="reviewUrlInput" rows="4" placeholder="每行一个 review 链接或商品链接&#10;https://www.amazon.com/.../product-reviews/ASIN&#10;https://produto.mercadolivre.com.br/...&#10;https://shopee.com.br/...">${escapeHtml(state.standaloneReviewUrls || "")}</textarea>
+      </label>
+      <div class="control-row">
+        <button class="primary-btn" id="analyzeReviewBtn" type="button"${state.isReviewBusy ? " disabled" : ""}>${state.isReviewBusy ? "正在分析 Review..." : "单独分析 Review"}</button>
+      </div>
+      ${result ? `
+        <div class="signal-grid review-summary-grid">
+          <div class="signal"><b>含 Review 链接</b><span>${reviewScans.length} 条</span></div>
+          <div class="signal"><b>模型状态</b><span>${escapeHtml(meta.reasoning_effort || "已返回")}</span></div>
+          <div class="signal"><b>Token</b><span>${escapeHtml(String(meta.usage?.total_tokens || result.usage?.total_tokens || 0))}</span></div>
+          <div class="signal"><b>用途边界</b><span>独立分析，不触发生图</span></div>
+        </div>
+        ${cards.length ? `
+          <div class="review-insights-grid">
+            ${cards.map(([label, value]) => `
+              <article>
+                <b>${escapeHtml(label)}</b>
+                ${renderInsightValue(value)}
+              </article>
+            `).join("")}
+          </div>
+        ` : `<p>该次分析没有返回 Review Modifier 结构化结果。</p>`}
+        ${reviewScans.length ? `
+          <h3>单独链接 Review 原始证据</h3>
+          <div class="review-source-list">
+            ${reviewScans.map(renderReviewSourceEvidence).join("")}
+          </div>
+        ` : `<p>该次分析未提取到可见 Review 原始证据。</p>`}
+      ` : ""}
+    </section>
+  `;
+}
+
 function renderReviewAnalysisPage() {
   const result = state.latestRemoteResult;
   const scans = Array.isArray(result?.link_scan_results) ? result.link_scan_results : [];
@@ -1593,6 +1666,7 @@ function renderReviewAnalysisPage() {
   return `
     <h2>Review 分析</h2>
     <p>这里单独展示链接采集到的 Review 原始信号和 ChatGPT 5.5 的整体分析结论。该模块只作为卖点、痛点、葡语表达和差评预防参考，不改变 11 张图逐张生成流程。</p>
+    ${renderStandaloneReviewPanel()}
     <div class="signal-grid review-summary-grid">
       <div class="signal"><b>含 Review 链接</b><span>${reviewScans.length} 条</span></div>
       <div class="signal"><b>模型状态</b><span>${escapeHtml(meta.reasoning_effort || (result ? "已返回" : "等待生成"))}</span></div>
@@ -1607,6 +1681,56 @@ function renderReviewAnalysisPage() {
       </div>
     ` : `<p>暂无可见 Review 原始证据。请先在工作流输入中添加可采集 review 的商品链接并开始自动生成。</p>`}
   `;
+}
+
+async function requestStandaloneReviewAnalysis() {
+  const reviewUrls = extractSourceUrls(state.standaloneReviewUrls || els.reviewUrlInput?.value || "");
+  if (!reviewUrls.length) {
+    const error = new Error("请先填写至少一个 review 链接或商品链接。");
+    error.payload = { error: "REVIEW_URLS_REQUIRED", message: error.message, endpoint: "/api/review-analysis" };
+    throw error;
+  }
+  return apiRequest("/api/review-analysis", {
+    method: "POST",
+    body: JSON.stringify({
+      review_urls: reviewUrls,
+      product: {
+        name: els.productName.value.trim(),
+        selling_points: els.sellingPoints.value.trim()
+      }
+    })
+  });
+}
+
+function bindReviewAnalysisControls() {
+  els.reviewUrlInput = document.querySelector("#reviewUrlInput");
+  els.analyzeReviewBtn = document.querySelector("#analyzeReviewBtn");
+  if (els.reviewUrlInput) {
+    els.reviewUrlInput.addEventListener("input", () => {
+      state.standaloneReviewUrls = els.reviewUrlInput.value;
+    });
+  }
+  if (els.analyzeReviewBtn) {
+    els.analyzeReviewBtn.addEventListener("click", async () => {
+      if (state.isReviewBusy) return;
+      state.standaloneReviewUrls = els.reviewUrlInput?.value || state.standaloneReviewUrls;
+      state.isReviewBusy = true;
+      state.standaloneReviewStatus = "正在采集链接 review 并调用 Review Modifier 模型...";
+      renderOutputs();
+      activateTab("review");
+      try {
+        const data = await requestStandaloneReviewAnalysis();
+        state.standaloneReviewResult = data;
+        state.standaloneReviewStatus = `Review 独立分析完成：${data.link_scan_results?.length || 0} 条链接，模型 ${data.model || "gpt-5.5"}。`;
+      } catch (error) {
+        state.standaloneReviewResult = normalizeApiErrorPayload(error, "/api/review-analysis");
+        state.standaloneReviewStatus = `Review 独立分析失败：${summarizeApiError(error)}`;
+      }
+      state.isReviewBusy = false;
+      renderOutputs();
+      activateTab("review");
+    });
+  }
 }
 
 function renderReviewSourceEvidence(scan = {}) {
