@@ -169,6 +169,161 @@ async function testAmazonReviewPageIsFetchedWhenProductPageHasOnlyReviewCount() 
   }
 }
 
+async function testAmazonBrazilReviewUrlsUseRecentPaginatedReviewPath() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY,
+    BRIGHTDATA_ZONE: process.env.BRIGHTDATA_ZONE,
+    BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS
+  };
+  const previousFetch = global.fetch;
+  const calls = [];
+
+  process.env.NODE_ENV = "test";
+  process.env.BRIGHTDATA_API_KEY = "brd-test";
+  process.env.BRIGHTDATA_ZONE = "web_unlocker1";
+  process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "200";
+
+  global.fetch = async (url, options = {}) => {
+    assert.strictEqual(String(url), "https://api.brightdata.com/request");
+    const body = JSON.parse(options.body || "{}");
+    calls.push(body.url);
+    const target = String(body.url);
+    const pageNumber = Number(target.match(/pageNumber=(\d+)/)?.[1] || 1);
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ/ref=cm_cr_arp_d_viewopt_srt")) {
+      return new Response(`
+        <html><body>
+          <div data-hook="review">
+            <span data-hook="review-body">Brazil recent page ${pageNumber}: embalagem chegou danificada, mas o produto e facil de usar.</span>
+          </div>
+        </body></html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    return new Response(`
+      <html>
+        <head><title>Hismile Brazil</title></head>
+        <body>
+          <span itemprop="ratingValue" content="4.1"></span>
+          <span itemprop="reviewCount" content="2700"></span>
+          <div id="landingImage" data-a-dynamic-image='{"https://m.media-amazon.com/images/I/main-br.jpg":[1000,1000]}'></div>
+        </body>
+      </html>
+    `, { status: 200, headers: { "Content-Type": "text/html" } });
+  };
+
+  try {
+    clearApiModule();
+    const { scanProductLink } = require(path.join(root, "api/generate.js"));
+    const result = await scanProductLink(
+      "https://www.amazon.com.br/Hismile-Whitening-Treatment-Combining-Correction/dp/B0F42ZTSZZ?ref_=ast_sto_dp&th=1",
+      { market: "br" }
+    );
+
+    const reviewCalls = calls.filter((url) => String(url).includes("/product-reviews/B0F42ZTSZZ/ref=cm_cr_arp_d_viewopt_srt"));
+    assert(reviewCalls.length, `expected Brazil Amazon review URL fetch, got ${JSON.stringify(calls)}`);
+    assert(
+      reviewCalls.every((url) => String(url).startsWith("https://www.amazon.com.br/product-reviews/B0F42ZTSZZ/ref=cm_cr_arp_d_viewopt_srt?")),
+      `expected Brazilian review URLs to use the requested path, got ${JSON.stringify(reviewCalls)}`
+    );
+    assert(
+      reviewCalls.some((url) => String(url).includes("reviewerType=all_reviews") && String(url).includes("sortBy=recent") && String(url).includes("pageNumber=1")),
+      `expected recent page 1 URL, got ${JSON.stringify(reviewCalls)}`
+    );
+    assert(
+      reviewCalls.some((url) => String(url).includes("sortBy=recent") && String(url).includes("pageNumber=2")),
+      `expected paginated recent page 2 URL, got ${JSON.stringify(reviewCalls)}`
+    );
+    assert.match(result.review_insights.snippets.join(" "), /Brazil recent page/);
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModule();
+  }
+}
+
+async function testAmazonAllReviewsEntryLinkIsFetchedBeforeReviewPagination() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY,
+    BRIGHTDATA_ZONE: process.env.BRIGHTDATA_ZONE,
+    BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS
+  };
+  const previousFetch = global.fetch;
+  const calls = [];
+
+  process.env.NODE_ENV = "test";
+  process.env.BRIGHTDATA_API_KEY = "brd-test";
+  process.env.BRIGHTDATA_ZONE = "web_unlocker1";
+  process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "200";
+
+  global.fetch = async (url, options = {}) => {
+    assert.strictEqual(String(url), "https://api.brightdata.com/request");
+    const body = JSON.parse(options.body || "{}");
+    calls.push(body.url);
+    const target = String(body.url);
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ/ref=cm_cr_dp_d_show_all_btm")) {
+      return new Response(`
+        <html><body>
+          <div data-hook="review">
+            <span data-hook="review-body">All reviews entry page: latest customer says results are good but packaging was damaged.</span>
+          </div>
+        </body></html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ")) {
+      return new Response(`
+        <html><body>
+          <div data-hook="review">
+            <span data-hook="review-body">Paginated review page: easy routine and mild taste.</span>
+          </div>
+        </body></html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    return new Response(`
+      <html>
+        <head><title>Hismile Whitening Treatment</title></head>
+        <body>
+          <span itemprop="ratingValue" content="4.2"></span>
+          <span itemprop="reviewCount" content="2700"></span>
+          <div id="reviews-medley-footer">
+            <a data-hook="see-all-reviews-link-foot" href="/product-reviews/B0F42ZTSZZ/ref=cm_cr_dp_d_show_all_btm?ie=UTF8&reviewerType=all_reviews">See all reviews</a>
+          </div>
+          <div id="landingImage" data-a-dynamic-image='{"https://m.media-amazon.com/images/I/main.jpg":[1000,1000]}'></div>
+        </body>
+      </html>
+    `, { status: 200, headers: { "Content-Type": "text/html" } });
+  };
+
+  try {
+    clearApiModule();
+    const { scanProductLink } = require(path.join(root, "api/generate.js"));
+    const result = await scanProductLink(
+      "https://www.amazon.com/Hismile-Whitening-Treatment-Combining-Correction/dp/B0F42ZTSZZ?ref_=ast_sto_dp&th=1",
+      { market: "us" }
+    );
+
+    const entryIndex = calls.findIndex((url) => String(url).includes("/product-reviews/B0F42ZTSZZ/ref=cm_cr_dp_d_show_all_btm"));
+    const paginatedIndex = calls.findIndex((url) => String(url).includes("/product-reviews/B0F42ZTSZZ") && String(url).includes("filterByStar="));
+    assert(entryIndex > 0, `expected all reviews entry link request, got ${JSON.stringify(calls)}`);
+    assert(paginatedIndex > entryIndex, `expected all reviews entry before star pagination, got ${JSON.stringify(calls)}`);
+    assert.match(result.review_insights.snippets.join(" "), /All reviews entry page/);
+    assert.strictEqual(result.review_fetch_diagnostics.all_reviews_entry_found, true);
+    assert.match(result.review_fetch_diagnostics.all_reviews_entry_url, /cm_cr_dp_d_show_all_btm/);
+    assert(result.review_fetch_diagnostics.attempted_url_count >= 2);
+    assert(result.review_fetch_diagnostics.successful_page_count >= 1);
+    assert(result.review_fetch_diagnostics.extracted_snippet_count >= 1);
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModule();
+  }
+}
+
 async function testAmazonNegativeReviewPagesArePrioritized() {
   const previousEnv = {
     NODE_ENV: process.env.NODE_ENV,
@@ -243,7 +398,7 @@ async function testAmazonNegativeReviewPagesArePrioritized() {
     );
     assert(
       calls.findIndex((url) => String(url).includes("filterByStar=critical")) <
-        calls.findIndex((url) => String(url).includes("sortBy=recent")),
+        calls.findIndex((url) => String(url).includes("sortBy=recent") && !String(url).includes("filterByStar=")),
       `expected negative review fetch before recent review fetch, got ${JSON.stringify(calls)}`
     );
     const joined = result.review_insights.snippets.join(" ");
@@ -1148,25 +1303,22 @@ async function testFrontendShowsEnoughReviewEvidence() {
     appSource.includes("reviews.snippets.slice(0, 5)"),
     "scan evidence should preview more than two review snippets"
   );
-  assert(
-    appSource.includes("Review 分析来源"),
-    "review modifier panel should expose the model source note"
-  );
-  assert(
-    appSource.includes("整体 Review 结论"),
-    "review modifier panel should show the model's overall review summary"
-  );
-  for (const label of ["1. 整体采集信息", "2. 整体差评分析结果", "3. 好评后的卖点总结", "4. 产品打磨修改建议", "5. Listing/图片生成优化提示词"]) {
+  const requiredLabels = ["1. 整体采集信息", "2. 整体差评分析结果", "3. 好评后的卖点总结", "4. 产品打磨修改建议", "5. Listing/图片生成优化提示词"];
+  for (const label of requiredLabels) {
     assert(appSource.includes(label), `review modifier panel should show required section: ${label}`);
   }
-  assert(
-    appSource.includes("购买阻碍"),
-    "review modifier panel should show model-analyzed purchase barriers"
-  );
-  assert(
-    appSource.includes("分析方式"),
-    "review modifier panel should show whether the result came from JSON, coerced model text, or fallback analysis."
-  );
+  const cardEntriesBody = appSource.match(/function reviewModifierCardEntries\(insights = \{\}\) \{[\s\S]*?\n\}/)?.[0] || "";
+  for (const label of requiredLabels) {
+    assert(cardEntriesBody.includes(label), `review modifier cards should include required section: ${label}`);
+  }
+  for (const removedLabel of ["Review 分析来源", "整体 Review 结论", "购买阻碍", "分析方式", "模型失败原因", "情绪拆分", "客户痛点"]) {
+    assert(!cardEntriesBody.includes(removedLabel), `review modifier cards should not include removed section: ${removedLabel}`);
+  }
+  const standaloneReviewBody = appSource.match(/function renderStandaloneReviewPanel\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert(!standaloneReviewBody.includes("单独链接 Review 原始证据"), "standalone review panel should not render extra raw-evidence section.");
+  const reviewPageBody = appSource.match(/function renderReviewAnalysisPage\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert(!reviewPageBody.includes("逐链接 Review 原始证据"), "review analysis page should not render extra raw-evidence section.");
+  assert(!reviewPageBody.includes("review-summary-grid"), "review analysis page should not render extra status summary cards.");
   assert(
     appSource.includes("renderReviewModifierCards"),
     "review modifier cards should be rendered through a shared complete result helper."
@@ -1174,10 +1326,6 @@ async function testFrontendShowsEnoughReviewEvidence() {
   assert(
     appSource.includes("typeof value === \"string\""),
     "review modifier panel must render string fields such as analysis_method, review_summary, and source_note instead of showing empty placeholders."
-  );
-  assert(
-    appSource.includes("模型失败原因"),
-    "review modifier panel should expose model failure details when fallback is used."
   );
   assert(
     appSource.includes("reviewUrlInput: document.querySelector(\"#reviewUrlInput\")"),
@@ -1201,6 +1349,8 @@ async function run() {
   await testNestedAndSerializedReviewsAreExtracted();
   await testAmazonReviewBoilerplateIsFiltered();
   await testAmazonReviewPageIsFetchedWhenProductPageHasOnlyReviewCount();
+  await testAmazonBrazilReviewUrlsUseRecentPaginatedReviewPath();
+  await testAmazonAllReviewsEntryLinkIsFetchedBeforeReviewPagination();
   await testAmazonNegativeReviewPagesArePrioritized();
   await testAmazonPositiveReviewPagesFeedHighQualitySellingPoints();
   await testAmazonReviewPagesAreFetchedEvenWhenProductPageHasFewSnippets();

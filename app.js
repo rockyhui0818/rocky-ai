@@ -1571,24 +1571,7 @@ function reviewModifierCardEntries(insights = {}) {
     ["2. 整体差评分析结果", insights.negative_review_analysis],
     ["3. 好评后的卖点总结", insights.positive_selling_points],
     ["4. 产品打磨修改建议", insights.product_improvement_suggestions],
-    ["5. Listing/图片生成优化提示词", insights.listing_optimization_prompts],
-    ["分析方式", insights.analysis_method],
-    ["整体 Review 结论", insights.review_summary],
-    ["情绪拆分", insights.sentiment_breakdown],
-    ["客户痛点", insights.customer_pain_points],
-    ["购买阻碍", insights.purchase_barriers],
-    ["用户原话示例", insights.customer_language_examples],
-    ["高频好评点", insights.high_frequency_praise],
-    ["高频差评点", insights.high_frequency_complaints],
-    ["本土语言表达", insights.local_language],
-    ["真实使用场景", insights.usage_scenarios],
-    ["竞品弱点", insights.competitor_weaknesses],
-    ["主图提示词修饰", insights.prompt_modifiers?.main_images || insights.how_to_use],
-    ["详情页提示词修饰", insights.prompt_modifiers?.detail_pages],
-    ["不可覆盖约束", insights.prompt_modifiers?.negative_constraints],
-    ["Review 证据统计", insights.evidence_summary],
-    ["模型失败原因", insights.model_error || insights.error],
-    ["Review 分析来源", insights.source_note]
+    ["5. Listing/图片生成优化提示词", insights.listing_optimization_prompts]
   ];
 }
 
@@ -1631,19 +1614,7 @@ function renderStandaloneReviewPanel() {
         <button class="primary-btn" id="analyzeReviewBtn" type="button"${state.isReviewBusy ? " disabled" : ""}>${state.isReviewBusy ? "正在分析 Review..." : "单独分析 Review"}</button>
       </div>
       ${result ? `
-        <div class="signal-grid review-summary-grid">
-          <div class="signal"><b>含 Review 链接</b><span>${reviewScans.length} 条</span></div>
-          <div class="signal"><b>模型状态</b><span>${escapeHtml(meta.reasoning_effort || "已返回")}</span></div>
-          <div class="signal"><b>Token</b><span>${escapeHtml(String(meta.usage?.total_tokens || result.usage?.total_tokens || 0))}</span></div>
-          <div class="signal"><b>用途边界</b><span>独立分析，不触发生图</span></div>
-        </div>
         ${insights && typeof insights === "object" ? renderReviewModifierCards(insights) : `<p>该次分析没有返回 Review Modifier 结构化结果。</p>`}
-        ${reviewScans.length ? `
-          <h3>单独链接 Review 原始证据</h3>
-          <div class="review-source-list">
-            ${reviewScans.map(renderReviewSourceEvidence).join("")}
-          </div>
-        ` : `<p>该次分析未提取到可见 Review 原始证据。</p>`}
       ` : ""}
     </section>
   `;
@@ -1651,26 +1622,11 @@ function renderStandaloneReviewPanel() {
 
 function renderReviewAnalysisPage() {
   const result = state.latestRemoteResult;
-  const scans = Array.isArray(result?.link_scan_results) ? result.link_scan_results : [];
-  const reviewScans = scans.filter((scan) => hasReviewEvidence(scan.review_insights));
-  const meta = result?.review_modifier_meta || {};
   return `
     <h2>Review 分析</h2>
     <p>这里单独展示链接采集到的 Review 原始信号和 ChatGPT 5.5 的整体分析结论。该模块只作为卖点、痛点、葡语表达和差评预防参考，不改变 11 张图逐张生成流程。</p>
     ${renderStandaloneReviewPanel()}
-    <div class="signal-grid review-summary-grid">
-      <div class="signal"><b>含 Review 链接</b><span>${reviewScans.length} 条</span></div>
-      <div class="signal"><b>模型状态</b><span>${escapeHtml(meta.reasoning_effort || (result ? "已返回" : "等待生成"))}</span></div>
-      <div class="signal"><b>Token</b><span>${escapeHtml(String(meta.usage?.total_tokens || 0))}</span></div>
-      <div class="signal"><b>用途边界</b><span>只修饰文案和痛点，不改产品外观</span></div>
-    </div>
     ${renderReviewInsightsPanel()}
-    <h3>逐链接 Review 原始证据</h3>
-    ${reviewScans.length ? `
-      <div class="review-source-list">
-        ${reviewScans.map(renderReviewSourceEvidence).join("")}
-      </div>
-    ` : `<p>暂无可见 Review 原始证据。请先在工作流输入中添加可采集 review 的商品链接并开始自动生成。</p>`}
   `;
 }
 
@@ -1800,6 +1756,7 @@ function renderScanEvidenceItem(scan) {
   const images = Array.isArray(scan.image_candidates) ? scan.image_candidates.slice(0, 15) : [];
   const headings = Array.isArray(scan.headings) ? scan.headings.slice(0, 8) : [];
   const reviews = scan.review_insights || {};
+  const reviewFetch = scan.review_fetch_diagnostics || {};
   const scannerLabel = scan.scanner === "brightdata" ? "Bright Data 精简采集" : (scan.scanner === "local-browser" ? "本机浏览器采集" : "后端直接采集");
   const scanStatus = scan.ok ? `扫描成功 · ${scannerLabel}` : (scan.error === "LINK_SCAN_BLOCKED" ? "平台风控拦截，未读到真实商品页" : escapeHtml(scan.error || "扫描失败"));
   const scope = scan.scan_scope || {};
@@ -1814,6 +1771,9 @@ function renderScanEvidenceItem(scan) {
     reviews.review_count ? `${reviews.review_count} 条评价` : "",
     Array.isArray(reviews.negative_snippets) && reviews.negative_snippets.length ? `差评原文 ${reviews.negative_snippets.length} 条` : "",
     Array.isArray(reviews.positive_snippets) && reviews.positive_snippets.length ? `好评原文 ${reviews.positive_snippets.length} 条` : "",
+    reviewFetch.attempted_url_count ? `Review页尝试 ${reviewFetch.attempted_url_count} 个` : "",
+    reviewFetch.successful_page_count ? `Review页成功 ${reviewFetch.successful_page_count} 个` : "",
+    reviewFetch.all_reviews_entry_found ? "All reviews入口：已命中" : (reviewFetch.attempted_url_count ? "All reviews入口：未在商品页发现" : ""),
     Array.isArray(reviews.positive_terms) && reviews.positive_terms.length ? `好评词：${reviews.positive_terms.slice(0, 4).map((item) => item.term).join(" / ")}` : "",
     Array.isArray(reviews.negative_terms) && reviews.negative_terms.length ? `差评词：${reviews.negative_terms.slice(0, 4).map((item) => item.term).join(" / ")}` : ""
   ].filter(Boolean);
@@ -1825,6 +1785,7 @@ function renderScanEvidenceItem(scan) {
       ${scan.message ? `<p>${escapeHtml(scan.message)}</p>` : ""}
       ${scan.description ? `<p>${escapeHtml(scan.description)}</p>` : ""}
       ${reviewBits.length ? `<div class="scan-tags">${reviewBits.map((item) => `<em>${escapeHtml(item)}</em>`).join("")}</div>` : ""}
+      ${reviewFetch.attempted_url_count ? `<p><b>Review 抓取诊断：</b>${escapeHtml(`入口${reviewFetch.all_reviews_entry_found ? "已找到" : "未找到"}；成功 ${reviewFetch.successful_page_count || 0} 页；空页 ${reviewFetch.empty_page_count || 0} 页；风控 ${reviewFetch.blocked_page_count || 0} 页；失败 ${reviewFetch.failed_page_count || 0} 页；提取摘要 ${reviewFetch.extracted_snippet_count || 0} 条。`)}</p>` : ""}
       ${Array.isArray(reviews.snippets) && reviews.snippets.length ? `<p><b>Review 摘要：</b>${escapeHtml(`${reviews.snippets.length} 条可见 review 摘要：${reviews.snippets.slice(0, 5).join(" / ")}`)}</p>` : ""}
       ${headings.length ? `<div class="scan-tags">${headings.map((item) => `<em>H${escapeHtml(item.level)} ${escapeHtml(item.text)}</em>`).join("")}</div>` : ""}
       ${images.length ? `

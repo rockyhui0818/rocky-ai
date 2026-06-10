@@ -1024,37 +1024,86 @@ function amazonReviewUrl(productUrl = "") {
   try {
     const url = new URL(productUrl);
     if (!/amazon\./i.test(url.hostname)) return "";
-    return `${url.protocol}//${url.hostname}/product-reviews/${asin}?sortBy=recent&reviewerType=all_reviews`;
+    const base = amazonReviewBaseUrl(url, asin);
+    return `${base}?reviewerType=all_reviews&sortBy=recent&pageNumber=1`;
   } catch {
     return "";
   }
 }
 
-function amazonReviewUrls(productUrl = "") {
+function amazonReviewBaseUrl(url, asin) {
+  const root = `${url.protocol}//${url.hostname}/product-reviews/${asin}`;
+  if (/amazon\.com\.br$/i.test(url.hostname)) return `${root}/ref=cm_cr_arp_d_viewopt_srt`;
+  return root;
+}
+
+function amazonReviewPageUrl(base, params = {}) {
+  const query = new URLSearchParams();
+  query.set("reviewerType", "all_reviews");
+  query.set("sortBy", params.sortBy || "recent");
+  if (params.pageNumber !== undefined && params.pageNumber !== null && params.pageNumber !== "") query.set("pageNumber", String(params.pageNumber));
+  if (params.filterByStar) query.set("filterByStar", String(params.filterByStar));
+  return `${base}?${query.toString()}`;
+}
+
+function normalizeAmazonAllReviewsEntryUrl(entryUrl = "") {
+  if (!entryUrl) return "";
+  try {
+    const url = new URL(entryUrl);
+    if (!/amazon\./i.test(url.hostname) || !/\/product-reviews\/[A-Z0-9]{10}/i.test(url.pathname)) return "";
+    url.searchParams.set("reviewerType", "all_reviews");
+    url.searchParams.set("sortBy", "recent");
+    url.searchParams.set("pageNumber", "1");
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function extractAllReviewsEntryUrl(html = "", baseUrl = "") {
+  if (!html || !baseUrl || !/amazon\./i.test(baseUrl)) return "";
+  const anchors = Array.from(String(html).matchAll(/<a\b([^>]*?)>([\s\S]*?)<\/a>/gi));
+  for (const [, attrs, labelHtml] of anchors) {
+    const href = attrs.match(/\bhref=["']([^"']+)["']/i)?.[1];
+    if (!href) continue;
+    const label = cleanText(labelHtml, 180);
+    const combined = `${attrs} ${label} ${href}`;
+    if (!/product-reviews/i.test(href)) continue;
+    if (!/(all[_\s-]?reviews|see all reviews|ver todas|todas as avalia|avalia[cç][oõ]es|cm_cr_dp_d_show_all|see-all-reviews|cr-arp)/i.test(combined)) continue;
+    return normalizeAmazonAllReviewsEntryUrl(absolutizeUrl(decodeHtmlEntities(href), baseUrl));
+  }
+  return "";
+}
+
+function amazonReviewUrls(productUrl = "", options = {}) {
   const asin = extractAmazonAsin(productUrl);
   if (!asin) return [];
   try {
     const url = new URL(productUrl);
     if (!/amazon\./i.test(url.hostname)) return [];
-    const base = `${url.protocol}//${url.hostname}/product-reviews/${asin}`;
+    const base = amazonReviewBaseUrl(url, asin);
     const urls = [];
+    const entryUrl = normalizeAmazonAllReviewsEntryUrl(options.allReviewsEntryUrl || "");
+    if (entryUrl) urls.push(entryUrl);
     for (const starFilter of ["one_star", "two_star"]) {
       for (let page = 1; page <= AMAZON_LOW_STAR_REVIEW_PAGES; page += 1) {
-        urls.push(`${base}?filterByStar=${starFilter}&reviewerType=all_reviews&pageNumber=${page}`);
+        urls.push(amazonReviewPageUrl(base, { filterByStar: starFilter, pageNumber: page }));
       }
     }
     for (let page = 1; page <= AMAZON_REVIEW_FALLBACK_PAGES; page += 1) {
-      urls.push(`${base}?filterByStar=critical&reviewerType=all_reviews&pageNumber=${page}`);
+      urls.push(amazonReviewPageUrl(base, { filterByStar: "critical", pageNumber: page }));
     }
-    urls.push(`${base}?filterByStar=three_star&reviewerType=all_reviews&pageNumber=1`);
+    urls.push(amazonReviewPageUrl(base, { filterByStar: "three_star", pageNumber: 1 }));
     for (let page = 1; page <= AMAZON_FIVE_STAR_REVIEW_PAGES; page += 1) {
-      urls.push(`${base}?filterByStar=five_star&reviewerType=all_reviews&pageNumber=${page}`);
+      urls.push(amazonReviewPageUrl(base, { filterByStar: "five_star", pageNumber: page }));
     }
     for (let page = 1; page <= AMAZON_REVIEW_FALLBACK_PAGES; page += 1) {
-      urls.push(`${base}?filterByStar=positive&reviewerType=all_reviews&pageNumber=${page}`);
+      urls.push(amazonReviewPageUrl(base, { filterByStar: "positive", pageNumber: page }));
     }
-    urls.push(`${base}?sortBy=recent&reviewerType=all_reviews&pageNumber=1`);
-    return urls;
+    for (let page = 1; page <= AMAZON_REVIEW_FALLBACK_PAGES; page += 1) {
+      urls.push(amazonReviewPageUrl(base, { sortBy: "recent", pageNumber: page }));
+    }
+    return Array.from(new Set(urls));
   } catch {
     return [];
   }
@@ -1096,9 +1145,21 @@ function mergeReviewInsights(primary = null, extra = null) {
   };
 }
 
-async function fetchSupplementalReviewInsights(url, signal) {
-  const reviewUrls = amazonReviewUrls(url);
-  if (!reviewUrls.length || !process.env.BRIGHTDATA_API_KEY) return null;
+async function fetchSupplementalReviewInsights(url, signal, options = {}) {
+  const allReviewsEntryUrl = options.html ? extractAllReviewsEntryUrl(options.html, url) : "";
+  const reviewUrls = amazonReviewUrls(url, { allReviewsEntryUrl });
+  const diagnostics = {
+    all_reviews_entry_found: Boolean(allReviewsEntryUrl),
+    all_reviews_entry_url: allReviewsEntryUrl || "",
+    attempted_url_count: reviewUrls.length,
+    successful_page_count: 0,
+    blocked_page_count: 0,
+    empty_page_count: 0,
+    failed_page_count: 0,
+    extracted_snippet_count: 0,
+    first_attempted_urls: reviewUrls.slice(0, 8)
+  };
+  if (!reviewUrls.length || !process.env.BRIGHTDATA_API_KEY) return { insights: null, diagnostics };
   let merged = null;
   for (let index = 0; index < reviewUrls.length; index += SUPPLEMENTAL_REVIEW_FETCH_CONCURRENCY) {
     const negativeFull = (merged?.negative_snippets?.length || 0) >= MAX_NEGATIVE_REVIEW_SNIPPETS;
@@ -1109,11 +1170,26 @@ async function fetchSupplementalReviewInsights(url, signal) {
     const batchResults = await Promise.all(batch.map(async (reviewUrl) => {
       try {
         const { response, html } = await fetchProductHtml(reviewUrl, signal);
-        if (!response.ok || isBotProtectionPage(html, response.url)) return null;
-        return extractReviewInsights(html, "amazon", {
+        if (!response.ok) {
+          diagnostics.failed_page_count += 1;
+          return null;
+        }
+        if (isBotProtectionPage(html, response.url)) {
+          diagnostics.blocked_page_count += 1;
+          return null;
+        }
+        const insights = extractReviewInsights(html, "amazon", {
           sentimentBucket: reviewSentimentBucketFromUrl(reviewUrl)
         });
+        if (insights) {
+          diagnostics.successful_page_count += 1;
+          diagnostics.extracted_snippet_count += Array.isArray(insights.snippets) ? insights.snippets.length : 0;
+        } else {
+          diagnostics.empty_page_count += 1;
+        }
+        return insights;
       } catch {
+        diagnostics.failed_page_count += 1;
         return null;
       }
     }));
@@ -1121,7 +1197,7 @@ async function fetchSupplementalReviewInsights(url, signal) {
       if (insights) merged = mergeReviewInsights(merged, insights);
     }
   }
-  return merged;
+  return { insights: merged, diagnostics };
 }
 
 function cleanBrightDataScanResult(scan) {
@@ -1289,9 +1365,10 @@ async function scanProductLink(url, marketHint) {
     }
     const platform = detectPlatform(response.url || url, html);
     const reviewInsights = extractReviewInsights(html, platform.key);
-    const supplementalReviews = shouldFetchSupplementalReviewInsights(reviewInsights, platform.key)
-      ? await fetchSupplementalReviewInsights(response.url || url, controller.signal)
+    const supplementalReviewResult = shouldFetchSupplementalReviewInsights(reviewInsights, platform.key)
+      ? await fetchSupplementalReviewInsights(response.url || url, controller.signal, { html })
       : null;
+    const supplementalReviews = supplementalReviewResult?.insights || null;
     const scan = {
       url,
       market_hint: marketHint,
@@ -1306,6 +1383,7 @@ async function scanProductLink(url, marketHint) {
       image_candidates: extractImageCandidates(html, response.url),
       headings: extractHeadings(html),
       review_insights: mergeReviewInsights(reviewInsights, supplementalReviews),
+      review_fetch_diagnostics: supplementalReviewResult?.diagnostics || null,
       page_text_sample: cleanText(html, PAGE_TEXT_SAMPLE_LENGTH)
     };
     return scanner === "brightdata" ? cleanBrightDataScanResult(scan) : scan;
@@ -1377,6 +1455,7 @@ function compactScanResult(item = {}) {
       }))
       : [],
     review_insights: item.review_insights || null,
+    review_fetch_diagnostics: item.review_fetch_diagnostics || null,
     headings: Array.isArray(item.headings)
       ? item.headings.slice(0, MAX_HEADINGS).map((heading) => ({
           level: heading.level,
