@@ -1429,7 +1429,15 @@ async function testFrontendShowsEnoughReviewEvidence() {
   );
   assert(
     appSource.includes("apiRequest(\"/api/review-analysis\""),
-    "frontend should call the standalone review analysis API."
+    "frontend should keep the synchronous standalone review analysis API available as compatibility fallback."
+  );
+  assert(
+    appSource.includes("apiRequest(\"/api/review-analysis-job\""),
+    "frontend should create a background job for standalone review analysis instead of relying on one long request."
+  );
+  assert(
+    appSource.includes("pollGenerateJob(jobResponse.job?.id)"),
+    "frontend should poll the review analysis job until the backend finishes."
   );
   assert(
     appSource.includes("state.standaloneReviewResult"),

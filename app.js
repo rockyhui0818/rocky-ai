@@ -1637,16 +1637,27 @@ async function requestStandaloneReviewAnalysis() {
     error.payload = { error: "REVIEW_URLS_REQUIRED", message: error.message, endpoint: "/api/review-analysis" };
     throw error;
   }
-  return apiRequest("/api/review-analysis", {
+  const payload = {
+    review_urls: reviewUrls,
+    product: {
+      name: els.productName.value.trim(),
+      selling_points: els.sellingPoints.value.trim()
+    }
+  };
+  const jobResponse = await apiRequest("/api/review-analysis-job", {
     method: "POST",
-    body: JSON.stringify({
-      review_urls: reviewUrls,
-      product: {
-        name: els.productName.value.trim(),
-        selling_points: els.sellingPoints.value.trim()
-      }
-    })
+    body: JSON.stringify(payload)
+  }).catch((error) => {
+    if (error.status === 404 || error.status === 405) {
+      return apiRequest("/api/review-analysis", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+    }
+    throw error;
   });
+  if (jobResponse && !jobResponse.job) return jobResponse;
+  return pollGenerateJob(jobResponse.job?.id);
 }
 
 function bindReviewAnalysisControls() {

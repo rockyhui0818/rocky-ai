@@ -12,6 +12,9 @@
     "api/review-analysis.js": {
       "maxDuration": 300
     },
+    "api/review-analysis-job.js": {
+      "maxDuration": 300
+    },
     "api/image.js": {
       "maxDuration": 120
     },

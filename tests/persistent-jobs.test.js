@@ -6,6 +6,7 @@ const root = path.resolve(__dirname, "..");
 const schema = fs.readFileSync(path.join(root, "supabase/schema.sql"), "utf8");
 const jobsSource = fs.readFileSync(path.join(root, "api/_lib/jobs.js"), "utf8");
 const generateJobSource = fs.readFileSync(path.join(root, "api/generate-job.js"), "utf8");
+const reviewAnalysisJobSource = fs.readFileSync(path.join(root, "api/review-analysis-job.js"), "utf8");
 const generateStatusSource = fs.readFileSync(path.join(root, "api/generate-status.js"), "utf8");
 const vercelConfig = JSON.parse(fs.readFileSync(path.join(root, "vercel.json"), "utf8"));
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
@@ -71,6 +72,17 @@ assert(
 );
 
 assert(
+  reviewAnalysisJobSource.includes("runReviewAnalysisWorkflow") &&
+    /(?:const|let|var)?\s*job\s*=\s*await createJob/.test(reviewAnalysisJobSource),
+  "review-analysis-job handler must create a persistent job and run review analysis in the background."
+);
+
+assert(
+  reviewAnalysisJobSource.includes("waitUntil(jobPromise)"),
+  "review-analysis-job handler must register background work with Vercel waitUntil when available."
+);
+
+assert(
   /(?:const|let|var)?\s*job\s*=\s*await getJob/.test(generateStatusSource),
   "generate-status handler must await persistent job lookup."
 );
@@ -78,6 +90,11 @@ assert(
 assert(
   vercelConfig.functions?.["api/generate-job.js"]?.maxDuration >= 300,
   "Vercel generate-job function must have enough maxDuration for long-running generation."
+);
+
+assert(
+  vercelConfig.functions?.["api/review-analysis-job.js"]?.maxDuration >= 300,
+  "Vercel review-analysis-job function must have enough maxDuration for long-running review collection."
 );
 
 assert(
