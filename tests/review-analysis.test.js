@@ -1387,6 +1387,14 @@ async function testFrontendShowsEnoughReviewEvidence() {
     appSource.includes("reviews.snippets.slice(0, 5)"),
     "scan evidence should preview more than two review snippets"
   );
+  assert(
+    appSource.includes("reviewFetch.all_reviews_entry_url"),
+    "scan evidence should show the concrete Amazon all reviews entry URL."
+  );
+  assert(
+    appSource.includes("reviewFetch.first_attempted_urls"),
+    "scan evidence should show the concrete review URLs attempted by the backend."
+  );
   const requiredLabels = ["1. 整体采集信息", "2. 整体差评分析结果", "3. 好评后的卖点总结", "4. 产品打磨修改建议", "5. Listing/图片生成优化提示词"];
   for (const label of requiredLabels) {
     assert(appSource.includes(label), `review modifier panel should show required section: ${label}`);

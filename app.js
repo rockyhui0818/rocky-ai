@@ -1786,6 +1786,8 @@ function renderScanEvidenceItem(scan) {
       ${scan.description ? `<p>${escapeHtml(scan.description)}</p>` : ""}
       ${reviewBits.length ? `<div class="scan-tags">${reviewBits.map((item) => `<em>${escapeHtml(item)}</em>`).join("")}</div>` : ""}
       ${reviewFetch.attempted_url_count ? `<p><b>Review 抓取诊断：</b>${escapeHtml(`入口${reviewFetch.all_reviews_entry_found ? "已找到" : "未找到"}；成功 ${reviewFetch.successful_page_count || 0} 页；空页 ${reviewFetch.empty_page_count || 0} 页；风控 ${reviewFetch.blocked_page_count || 0} 页；失败 ${reviewFetch.failed_page_count || 0} 页；提取摘要 ${reviewFetch.extracted_snippet_count || 0} 条。`)}</p>` : ""}
+      ${reviewFetch.all_reviews_entry_url ? `<p><b>All reviews 入口URL：</b>${escapeHtml(reviewFetch.all_reviews_entry_url)}</p>` : ""}
+      ${Array.isArray(reviewFetch.first_attempted_urls) && reviewFetch.first_attempted_urls.length ? `<p><b>首批 Review 请求URL：</b>${escapeHtml(reviewFetch.first_attempted_urls.slice(0, 6).join(" / "))}</p>` : ""}
       ${Array.isArray(reviews.snippets) && reviews.snippets.length ? `<p><b>Review 摘要：</b>${escapeHtml(`${reviews.snippets.length} 条可见 review 摘要：${reviews.snippets.slice(0, 5).join(" / ")}`)}</p>` : ""}
       ${headings.length ? `<div class="scan-tags">${headings.map((item) => `<em>H${escapeHtml(item.level)} ${escapeHtml(item.text)}</em>`).join("")}</div>` : ""}
       ${images.length ? `
