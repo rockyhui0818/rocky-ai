@@ -1567,6 +1567,11 @@ function renderReviewInsightsPanel() {
 
 function reviewModifierCardEntries(insights = {}) {
   return [
+    ["1. 整体采集信息", insights.collection_overview],
+    ["2. 整体差评分析结果", insights.negative_review_analysis],
+    ["3. 好评后的卖点总结", insights.positive_selling_points],
+    ["4. 产品打磨修改建议", insights.product_improvement_suggestions],
+    ["5. Listing/图片生成优化提示词", insights.listing_optimization_prompts],
     ["分析方式", insights.analysis_method],
     ["整体 Review 结论", insights.review_summary],
     ["情绪拆分", insights.sentiment_breakdown],

@@ -87,6 +87,11 @@ async function testReviewAnalysisRouteAnalyzesStandaloneLinks() {
           message: {
             content: JSON.stringify({
               analysis_method: "gpt-5.5整体review分析",
+              collection_overview: ["1 link, 456 reviews, 2 snippets collected."],
+              negative_review_analysis: ["slow delivery creates expectation risk"],
+              positive_selling_points: ["daily quality", "safe packaging"],
+              product_improvement_suggestions: ["clarify shipping expectations"],
+              listing_optimization_prompts: ["Use review insights to optimize listing images and detail-page prompts."],
               review_summary: "Customers like daily quality and safe packaging, but delivery speed needs expectation management.",
               sentiment_breakdown: {
                 positive: ["daily quality", "safe packaging"],
@@ -140,6 +145,11 @@ async function testReviewAnalysisRouteAnalyzesStandaloneLinks() {
     assert.strictEqual(data.ok, true);
     assert.strictEqual(data.link_scan_results.length, 1);
     assert.strictEqual(data.review_modifier_analysis.source_note, "standalone review analysis");
+    assert.deepStrictEqual(data.review_modifier_analysis.collection_overview, ["1 link, 456 reviews, 2 snippets collected."]);
+    assert.deepStrictEqual(data.review_modifier_analysis.negative_review_analysis, ["slow delivery creates expectation risk"]);
+    assert.deepStrictEqual(data.review_modifier_analysis.positive_selling_points, ["daily quality", "safe packaging"]);
+    assert.deepStrictEqual(data.review_modifier_analysis.product_improvement_suggestions, ["clarify shipping expectations"]);
+    assert.deepStrictEqual(data.review_modifier_analysis.listing_optimization_prompts, ["Use review insights to optimize listing images and detail-page prompts."]);
     assert.deepStrictEqual(data.review_modifier_analysis.evidence_summary, {
       source_count: 1,
       snippet_count: 2,

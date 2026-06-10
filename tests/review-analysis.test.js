@@ -685,6 +685,85 @@ async function testAmazonSupplementalReviewPagesFetchInParallelBatches() {
   }
 }
 
+async function testAmazonKeepsExpandedLowStarSamplesBeyondInitialPages() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY,
+    BRIGHTDATA_ZONE: process.env.BRIGHTDATA_ZONE,
+    BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS
+  };
+  const previousFetch = global.fetch;
+  const calls = [];
+
+  process.env.NODE_ENV = "test";
+  process.env.BRIGHTDATA_API_KEY = "brd-test";
+  process.env.BRIGHTDATA_ZONE = "web_unlocker1";
+  process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "300";
+
+  global.fetch = async (url, options = {}) => {
+    assert.strictEqual(String(url), "https://api.brightdata.com/request");
+    const body = JSON.parse(options.body || "{}");
+    calls.push(body.url);
+    const target = String(body.url);
+    const pageNumber = Number(target.match(/pageNumber=(\d+)/)?.[1] || 1);
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ") && /filterByStar=(one_star|two_star)/.test(target)) {
+      const starLabel = target.includes("one_star") ? "one star" : "two star";
+      return new Response(`
+        <html><body>
+          ${Array.from({ length: 8 }, (_, index) => `
+            <div data-hook="review"><span data-hook="review-body">${starLabel} low star page ${pageNumber} complaint ${index + 1}: battery failed, package arrived damaged, difficult setup, refund requested.</span></div>
+          `).join("")}
+        </body></html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ") && /filterByStar=(five_star|positive)/.test(target)) {
+      return new Response(`
+        <html><body>
+          ${Array.from({ length: 10 }, (_, index) => `
+            <div data-hook="review"><span data-hook="review-body">Five star page ${pageNumber} praise ${index + 1}: great quality, easy daily use, excellent value, recommend it.</span></div>
+          `).join("")}
+        </body></html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ")) {
+      return new Response(`<html><body></body></html>`, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    return new Response(`
+      <html>
+        <head><title>Hismile Whitening Treatment</title></head>
+        <body>
+          <span itemprop="ratingValue" content="4.3"></span>
+          <span itemprop="reviewCount" content="18569"></span>
+          <div id="landingImage" data-a-dynamic-image='{"https://m.media-amazon.com/images/I/main.jpg":[1000,1000]}'></div>
+        </body>
+      </html>
+    `, { status: 200, headers: { "Content-Type": "text/html" } });
+  };
+
+  try {
+    clearApiModule();
+    const { scanProductLink } = require(path.join(root, "api/generate.js"));
+    const result = await scanProductLink(
+      "https://www.amazon.com/Hismile-Whitening-Treatment-Combining-Correction/dp/B0F42ZTSZZ?ref_=ast_sto_dp&th=1",
+      { market: "us" }
+    );
+
+    assert(calls.some((url) => String(url).includes("filterByStar=one_star") && String(url).includes("pageNumber=12")), "one-star collection should continue past the first 5 pages.");
+    assert(calls.some((url) => String(url).includes("filterByStar=two_star") && String(url).includes("pageNumber=12")), "two-star collection should continue past the first 5 pages.");
+    assert(result.review_insights.negative_snippets.length >= 150, `expected expanded low-star evidence, got ${result.review_insights.negative_snippets.length}`);
+    assert.strictEqual(result.review_insights.positive_snippets.length, 50);
+    assert.match(result.review_insights.negative_snippets.join(" "), /low star page 12 complaint/);
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModule();
+  }
+}
+
 async function testPlatformReviewSectionsArePreferredOverPageWideFallback() {
   const previousNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = "test";
@@ -982,6 +1061,81 @@ async function testRatingOnlyReviewEvidenceStillShowsConcreteStats() {
   }
 }
 
+async function testFallbackReviewModifierUsesRequiredFiveSections() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+    OPENAI_TEXT_MODEL: process.env.OPENAI_TEXT_MODEL,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY
+  };
+  const previousFetch = global.fetch;
+
+  process.env.NODE_ENV = "test";
+  process.env.OPENAI_API_KEY = "sk-test";
+  process.env.OPENAI_BASE_URL = "http://model.example/v1";
+  process.env.OPENAI_TEXT_MODEL = "text-test";
+  delete process.env.BRIGHTDATA_API_KEY;
+
+  global.fetch = async () => {
+    throw new Error("model unavailable");
+  };
+
+  try {
+    clearApiModule();
+    const { runGenerateWorkflow } = require(path.join(root, "api/generate.js"));
+    const result = await runGenerateWorkflow({
+      payload: {
+        product: { name: "Structured Review Product", source_urls: [] },
+        link_scan_results: [{
+          url: "https://www.amazon.com/example/dp/B000000003",
+          market_hint: "us",
+          ok: true,
+          title: "Structured Competitor",
+          image_candidates: [],
+          review_insights: {
+            rating: 4.3,
+            review_count: 18569,
+            snippets: [],
+            negative_snippets: [
+              "Battery failed after one week and customer support was slow.",
+              "Package arrived damaged and setup was difficult."
+            ],
+            positive_snippets: [
+              "Great quality and easy daily use.",
+              "Excellent value and reliable results.",
+              "I recommend it for family use."
+            ],
+            positive_terms: [{ term: "quality", count: 2 }],
+            negative_terms: [{ term: "package", count: 1 }],
+            scene_terms: [{ term: "daily", count: 1 }]
+          }
+        }]
+      },
+      token: "",
+      requestId: "review_five_section_test"
+    });
+
+    const review = result.result.review_modifier_analysis;
+    for (const field of [
+      "collection_overview",
+      "negative_review_analysis",
+      "positive_selling_points",
+      "product_improvement_suggestions",
+      "listing_optimization_prompts"
+    ]) {
+      assert(Array.isArray(review[field]) && review[field].length, `${field} should be a visible required section.`);
+    }
+    assert.match(review.negative_review_analysis.join(" "), /Battery failed|Package arrived damaged/);
+    assert.match(review.positive_selling_points.join(" "), /Great quality|Excellent value/);
+    assert.match(review.listing_optimization_prompts.join(" "), /图片|listing|详情页/i);
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModule();
+  }
+}
+
 async function testFrontendShowsEnoughReviewEvidence() {
   const fs = require("fs");
   const appSource = fs.readFileSync(path.join(root, "app.js"), "utf8");
@@ -1002,6 +1156,9 @@ async function testFrontendShowsEnoughReviewEvidence() {
     appSource.includes("整体 Review 结论"),
     "review modifier panel should show the model's overall review summary"
   );
+  for (const label of ["1. 整体采集信息", "2. 整体差评分析结果", "3. 好评后的卖点总结", "4. 产品打磨修改建议", "5. Listing/图片生成优化提示词"]) {
+    assert(appSource.includes(label), `review modifier panel should show required section: ${label}`);
+  }
   assert(
     appSource.includes("购买阻碍"),
     "review modifier panel should show model-analyzed purchase barriers"
@@ -1050,9 +1207,11 @@ async function run() {
   await testAmazonCollectsNegativeBucketsAndFiftyPositiveSamples();
   await testAmazonCollectsExplicitOneTwoAndFiveStarPages();
   await testAmazonSupplementalReviewPagesFetchInParallelBatches();
+  await testAmazonKeepsExpandedLowStarSamplesBeyondInitialPages();
   await testPlatformReviewSectionsArePreferredOverPageWideFallback();
   await testReviewEvidenceIsSentToModelAnalysis();
   await testRatingOnlyReviewEvidenceStillShowsConcreteStats();
+  await testFallbackReviewModifierUsesRequiredFiveSections();
   await testFrontendShowsEnoughReviewEvidence();
 }
 

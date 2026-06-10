@@ -10,10 +10,10 @@ const MAX_IMAGE_CANDIDATES = 15;
 const MAX_MAIN_IMAGE_CANDIDATES = 8;
 const MAX_DETAIL_IMAGE_CANDIDATES = 7;
 const MAX_HEADINGS = 10;
-const MAX_REVIEW_SNIPPETS = 120;
-const MAX_NEGATIVE_REVIEW_SNIPPETS = 120;
+const MAX_REVIEW_SNIPPETS = 260;
+const MAX_NEGATIVE_REVIEW_SNIPPETS = 240;
 const MAX_POSITIVE_REVIEW_SNIPPETS = 50;
-const AMAZON_LOW_STAR_REVIEW_PAGES = 5;
+const AMAZON_LOW_STAR_REVIEW_PAGES = 12;
 const AMAZON_REVIEW_FALLBACK_PAGES = 5;
 const AMAZON_FIVE_STAR_REVIEW_PAGES = 5;
 const SUPPLEMENTAL_REVIEW_FETCH_CONCURRENCY = 4;
@@ -1507,6 +1507,48 @@ function extractLinesByHints(text = "", hints = [], fallbackLimit = 6) {
   return source.slice(0, fallbackLimit);
 }
 
+function buildStructuredReviewSections({
+  summary = {},
+  statsText = "",
+  negativeSnippets = [],
+  positiveSnippets = [],
+  snippets = [],
+  negativeTerms = [],
+  positiveTerms = [],
+  sceneTerms = []
+} = {}) {
+  const negativeEvidence = negativeSnippets.length ? negativeSnippets : negativeTerms;
+  const positiveEvidence = positiveSnippets.length ? positiveSnippets : positiveTerms;
+  const collectionOverview = [
+    `采集来源：${summary.source_count || 0} 个链接；评分 ${summary.rating_average || "未知"}；评论总数 ${summary.review_count_total || 0}。`,
+    `原文证据：差评 ${summary.negative_snippet_count || negativeSnippets.length || 0} 条，好评 ${summary.positive_snippet_count || positiveSnippets.length || 0} 条，混合摘要 ${summary.snippet_count || snippets.length || 0} 条。`,
+    statsText ? `证据强度：${statsText}。` : "证据强度：当前只基于可见评论原文和页面评分。"
+  ];
+  const negativeAnalysis = negativeEvidence.length
+    ? negativeEvidence.slice(0, 12).map((item) => `差评痛点：${item}`)
+    : ["低星原文不足：需要继续用详情页解释尺寸、质量、包装、配送、使用步骤和售后，降低购买不确定性。"];
+  const positiveSellingPoints = positiveEvidence.length
+    ? positiveEvidence.slice(0, 12).map((item) => `可沉淀卖点：${item}`)
+    : ["好评原文不足：只能把评分和评论量作为信任背书，不能伪造用户原话。"];
+  const productImprovements = [
+    ...negativeAnalysis.slice(0, 6).map((item) => item.replace(/^差评痛点：/, "产品打磨建议：围绕“") + "”补充规格、使用说明、包装保护或售后承诺。"),
+    positiveSellingPoints.length ? `保留并强化高频好评卖点：${positiveSellingPoints.slice(0, 3).join(" / ")}。` : ""
+  ].filter(Boolean).slice(0, 8);
+  const listingPrompts = [
+    "图片生成优化提示词：基于上传产品图保持外观不变，在主图/副图中突出高频好评卖点，禁止虚构认证、功效和用户原话。",
+    `详情页优化提示词：优先回答差评集中担忧：${negativeAnalysis.slice(0, 4).join("；")}。`,
+    `卖点图优化提示词：用事实化短句表达：${positiveSellingPoints.slice(0, 4).join("；")}。`,
+    sceneTerms.length ? `场景图优化提示词：结合真实使用场景 ${sceneTerms.slice(0, 5).join(" / ")}，但不改变产品外观。` : "场景图优化提示词：用真实日常使用场景承接好评卖点和差评预防。"
+  ];
+  return {
+    collection_overview: collectionOverview,
+    negative_review_analysis: negativeAnalysis.slice(0, 10),
+    positive_selling_points: positiveSellingPoints.slice(0, 10),
+    product_improvement_suggestions: productImprovements,
+    listing_optimization_prompts: listingPrompts
+  };
+}
+
 function normalizeReviewModifierAnalysis(value = {}, reviewEvidence = {}) {
   const fallback = fallbackReviewModifierAnalysis(reviewEvidence);
   if (!value || typeof value !== "object") return fallback;
@@ -1544,6 +1586,11 @@ function normalizeReviewModifierAnalysis(value = {}, reviewEvidence = {}) {
   return {
     ...fallback,
     ...value,
+    collection_overview: Array.isArray(value.collection_overview) && value.collection_overview.length ? value.collection_overview : fallback.collection_overview,
+    negative_review_analysis: Array.isArray(value.negative_review_analysis) && value.negative_review_analysis.length ? value.negative_review_analysis : fallback.negative_review_analysis,
+    positive_selling_points: Array.isArray(value.positive_selling_points) && value.positive_selling_points.length ? value.positive_selling_points : fallback.positive_selling_points,
+    product_improvement_suggestions: Array.isArray(value.product_improvement_suggestions) && value.product_improvement_suggestions.length ? value.product_improvement_suggestions : fallback.product_improvement_suggestions,
+    listing_optimization_prompts: Array.isArray(value.listing_optimization_prompts) && value.listing_optimization_prompts.length ? value.listing_optimization_prompts : fallback.listing_optimization_prompts,
     sentiment_breakdown: {
       ...fallback.sentiment_breakdown,
       ...(value.sentiment_breakdown || {})
@@ -1610,8 +1657,19 @@ function fallbackReviewModifierAnalysis(reviewEvidence = {}) {
     "消费者可能看不到具体评论细节，因此会担心效果、尺寸、材质、包装或配送是否符合预期。",
     "如果只展示评分数量而没有评论原文，卖点图需要用事实化规格和使用步骤补足信任。"
   ];
+  const structuredSections = buildStructuredReviewSections({
+    summary,
+    statsText,
+    negativeSnippets,
+    positiveSnippets,
+    snippets,
+    negativeTerms,
+    positiveTerms,
+    sceneTerms
+  });
   return {
     analysis_method: "fallback-review-terms",
+    ...structuredSections,
     review_summary: evidenceSnippets.length
       ? `已采集 ${summary.snippet_count || snippets.length} 条可见 review 摘要，其中差评原文 ${negativeSnippets.length} 条、好评原文 ${positiveSnippets.length} 条${statsText ? `，${statsText}` : ""}；规则降级优先提取差评痛点，再用好评统计卖点。`
       : `未采集到足够 review 原文，已基于${statsText || "评分、评论数和关键词信号"}生成可执行 Review Modifier：优先把评分/评论量作为信任强度参考，同时用详情页解释规格、包装、配送和售后疑虑。`,
@@ -1986,8 +2044,9 @@ function buildReviewModifierPrompt({ reviewEvidence, product }) {
     "优先分析差评和低星评论：negative_snippets 是低星/差评原文桶，优先级最高；先提炼不满意原因、购买阻碍、效果/尺寸/包装/配送/使用难度/预期落差；差评结论必须转化为详情页 FAQ、规格解释、使用步骤和风险预防文案。",
     "优质评价用于统计优质卖点：positive_snippets 是高星/好评原文桶，最多 50 条；从好评原文中统计反复出现的好评原因、用户自然表达、真实使用场景和可转化卖点，输出到 high_frequency_praise、local_language、usage_scenarios 和 prompt_modifiers.main_images。",
     "如果 negative_snippets 或 positive_snippets 有内容，禁止输出“未采集到足够评论原文”；必须基于这些原文给出具体结论。",
+    "必须统一输出 5 个核心板块：1.collection_overview 整体采集信息；2.negative_review_analysis 整体差评分析结果；3.positive_selling_points 好评后的卖点总结；4.product_improvement_suggestions 产品打磨修改建议；5.listing_optimization_prompts 可用于后续图片生成和 listing 优化的提示词。",
     "Review 权重低于上传产品图和美国链接图片结构；只能用于：卖点措辞校准、巴西葡语自然表达、真实使用场景、差评预防、竞品弱点补充。",
-    "输出 JSON：{analysis_method,review_summary,sentiment_breakdown:{positive:[最多8条],negative:[最多8条],neutral:[最多6条]},customer_pain_points:[最多8条],purchase_barriers:[最多8条],customer_language_examples:[最多8条],high_frequency_praise:[最多8条],high_frequency_complaints:[最多8条],local_language:[最多12个],usage_scenarios:[最多8条],competitor_weaknesses:[最多8条],prompt_modifiers:{main_images:[最多8条],detail_pages:[最多8条],negative_constraints:[最多6条]},evidence_summary:{source_count,snippet_count,negative_snippet_count,positive_snippet_count,rating_average,review_count_total},source_note}。",
+    "输出 JSON：{analysis_method,collection_overview:[最多8条],negative_review_analysis:[最多12条],positive_selling_points:[最多12条],product_improvement_suggestions:[最多10条],listing_optimization_prompts:[最多10条],review_summary,sentiment_breakdown:{positive:[最多8条],negative:[最多8条],neutral:[最多6条]},customer_pain_points:[最多8条],purchase_barriers:[最多8条],customer_language_examples:[最多8条],high_frequency_praise:[最多8条],high_frequency_complaints:[最多8条],local_language:[最多12个],usage_scenarios:[最多8条],competitor_weaknesses:[最多8条],prompt_modifiers:{main_images:[最多8条],detail_pages:[最多8条],negative_constraints:[最多6条]},evidence_summary:{source_count,snippet_count,negative_snippet_count,positive_snippet_count,rating_average,review_count_total},source_note}。",
     "review_summary 必须是模型对整体 review 的具体结论；customer_pain_points 和 purchase_barriers 必须来自 review 原文/评分/评论数综合判断；customer_language_examples 必须保留用户原话或贴近原文的短句。",
     JSON.stringify({ product: compactProduct(product), review_evidence: reviewEvidence })
   ].join("\n");
