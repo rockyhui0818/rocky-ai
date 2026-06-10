@@ -1432,8 +1432,8 @@ async function testFrontendShowsEnoughReviewEvidence() {
     "frontend should keep the synchronous standalone review analysis API available as compatibility fallback."
   );
   assert(
-    appSource.includes("apiRequest(\"/api/review-analysis-job\""),
-    "frontend should create a background job for standalone review analysis instead of relying on one long request."
+    appSource.includes("mode: \"job\""),
+    "frontend should request a background job for standalone review analysis instead of relying on one long request."
   );
   assert(
     appSource.includes("pollGenerateJob(jobResponse.job?.id)"),

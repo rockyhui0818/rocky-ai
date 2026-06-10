@@ -4,7 +4,7 @@ const path = require("path");
 const root = path.resolve(__dirname, "..");
 
 function clearApiModules() {
-  for (const file of ["api/review-analysis.js", "api/generate.js"]) {
+  for (const file of ["api/review-analysis.js", "api/generate.js", "api/_lib/jobs.js", "api/_lib/supabase.js"]) {
     try {
       delete require.cache[require.resolve(path.join(root, file))];
     } catch {}
@@ -42,6 +42,59 @@ function restoreEnv(previousEnv) {
   for (const [key, value] of Object.entries(previousEnv)) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
+  }
+}
+
+async function testReviewAnalysisRouteCanStartBackgroundJob() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    VERCEL: process.env.VERCEL,
+    SUPABASE_URL: process.env.SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY
+  };
+  const previousFetch = global.fetch;
+  const rows = [];
+
+  process.env.NODE_ENV = "test";
+  delete process.env.VERCEL;
+  process.env.SUPABASE_URL = "https://supabase.example";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
+
+  global.fetch = async (url, options = {}) => {
+    if (String(url).includes("/rest/v1/generate_jobs")) {
+      const body = JSON.parse(options.body || "{}");
+      rows.push(body);
+      return new Response(JSON.stringify([body]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  try {
+    clearApiModules();
+    const handler = require(path.join(root, "api/review-analysis.js"));
+    const req = createJsonRequest({
+      mode: "job",
+      async: true,
+      review_urls: ["https://reviews.example/product"],
+      product: { name: "Async Review Product" }
+    });
+    const res = createJsonResponse();
+
+    await handler(req, res);
+    const data = JSON.parse(res.body);
+
+    assert.strictEqual(res.statusCode, 202);
+    assert.strictEqual(data.ok, true);
+    assert.match(data.job.id, /^job_/);
+    assert.strictEqual(data.job.stage, "review_queued");
+    assert.strictEqual(rows[0].stage, "review_queued");
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModules();
   }
 }
 
@@ -321,6 +374,7 @@ async function testReviewAnalysisShowsModelFailureReasonWhenFallbackIsUsed() {
 }
 
 async function run() {
+  await testReviewAnalysisRouteCanStartBackgroundJob();
   await testReviewAnalysisRouteAnalyzesStandaloneLinks();
   await testReviewAnalysisCoercesModelTextIntoVisibleInsights();
   await testReviewAnalysisShowsModelFailureReasonWhenFallbackIsUsed();

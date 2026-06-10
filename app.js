@@ -1644,11 +1644,15 @@ async function requestStandaloneReviewAnalysis() {
       selling_points: els.sellingPoints.value.trim()
     }
   };
-  const jobResponse = await apiRequest("/api/review-analysis-job", {
+  const jobResponse = await apiRequest("/api/review-analysis", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      ...payload,
+      async: true,
+      mode: "job"
+    })
   }).catch((error) => {
-    if (error.status === 404 || error.status === 405) {
+    if (error.status === 400 && error.payload?.error === "ASYNC_REVIEW_ANALYSIS_UNSUPPORTED") {
       return apiRequest("/api/review-analysis", {
         method: "POST",
         body: JSON.stringify(payload)
