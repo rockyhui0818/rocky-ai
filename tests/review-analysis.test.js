@@ -532,6 +532,97 @@ async function testAmazonCollectsNegativeBucketsAndFiftyPositiveSamples() {
   }
 }
 
+async function testAmazonCollectsExplicitOneTwoAndFiveStarPages() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY,
+    BRIGHTDATA_ZONE: process.env.BRIGHTDATA_ZONE,
+    BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS
+  };
+  const previousFetch = global.fetch;
+  const calls = [];
+
+  process.env.NODE_ENV = "test";
+  process.env.BRIGHTDATA_API_KEY = "brd-test";
+  process.env.BRIGHTDATA_ZONE = "web_unlocker1";
+  process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "200";
+
+  global.fetch = async (url, options = {}) => {
+    assert.strictEqual(String(url), "https://api.brightdata.com/request");
+    const body = JSON.parse(options.body || "{}");
+    calls.push(body.url);
+    const target = String(body.url);
+    const pageNumber = Number(target.match(/pageNumber=(\d+)/)?.[1] || 1);
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ") && target.includes("filterByStar=one_star")) {
+      return new Response(`
+        <html><body>
+          ${Array.from({ length: 4 }, (_, index) => `
+            <div data-hook="review"><span data-hook="review-body">One star complaint ${index + 1}: no whitening results, strips slipped, box arrived damaged.</span></div>
+          `).join("")}
+        </body></html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ") && target.includes("filterByStar=two_star")) {
+      return new Response(`
+        <html><body>
+          ${Array.from({ length: 5 }, (_, index) => `
+            <div data-hook="review"><span data-hook="review-body">Two star complaint ${index + 1}: results faded quickly, difficult to use, package was crushed.</span></div>
+          `).join("")}
+        </body></html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ") && target.includes("filterByStar=five_star")) {
+      return new Response(`
+        <html><body>
+          ${Array.from({ length: 12 }, (_, index) => `
+            <div data-hook="review"><span data-hook="review-body">Five star page ${pageNumber} praise ${index + 1}: great whitening results, easy routine, excellent quality, recommend for events.</span></div>
+          `).join("")}
+        </body></html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ")) {
+      return new Response(`<html><body></body></html>`, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    return new Response(`
+      <html>
+        <head><title>Hismile Whitening Treatment</title></head>
+        <body>
+          <span itemprop="ratingValue" content="3.8"></span>
+          <span itemprop="reviewCount" content="2470"></span>
+          <div id="landingImage" data-a-dynamic-image='{"https://m.media-amazon.com/images/I/main.jpg":[1000,1000]}'></div>
+        </body>
+      </html>
+    `, { status: 200, headers: { "Content-Type": "text/html" } });
+  };
+
+  try {
+    clearApiModule();
+    const { scanProductLink } = require(path.join(root, "api/generate.js"));
+    const result = await scanProductLink(
+      "https://www.amazon.com/Hismile-Whitening-Treatment-Combining-Correction/dp/B0F42ZTSZZ?ref_=ast_sto_dp&th=1",
+      { market: "us" }
+    );
+
+    assert(calls.some((url) => String(url).includes("filterByStar=one_star")), `expected one-star review page fetch, got ${JSON.stringify(calls)}`);
+    assert(calls.some((url) => String(url).includes("filterByStar=two_star")), `expected two-star review page fetch, got ${JSON.stringify(calls)}`);
+    assert(calls.some((url) => String(url).includes("filterByStar=five_star")), `expected five-star review page fetch, got ${JSON.stringify(calls)}`);
+    assert.strictEqual(result.review_insights.negative_snippets.length, 9);
+    assert.strictEqual(result.review_insights.positive_snippets.length, 50);
+    assert.match(result.review_insights.negative_snippets.join(" "), /One star complaint 4/);
+    assert.match(result.review_insights.negative_snippets.join(" "), /Two star complaint 5/);
+    assert.match(result.review_insights.positive_snippets.join(" "), /Five star page 5 praise/);
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModule();
+  }
+}
+
 async function testPlatformReviewSectionsArePreferredOverPageWideFallback() {
   const previousNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = "test";
@@ -895,6 +986,7 @@ async function run() {
   await testAmazonPositiveReviewPagesFeedHighQualitySellingPoints();
   await testAmazonReviewPagesAreFetchedEvenWhenProductPageHasFewSnippets();
   await testAmazonCollectsNegativeBucketsAndFiftyPositiveSamples();
+  await testAmazonCollectsExplicitOneTwoAndFiveStarPages();
   await testPlatformReviewSectionsArePreferredOverPageWideFallback();
   await testReviewEvidenceIsSentToModelAnalysis();
   await testRatingOnlyReviewEvidenceStillShowsConcreteStats();

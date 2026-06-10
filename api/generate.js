@@ -13,8 +13,9 @@ const MAX_HEADINGS = 10;
 const MAX_REVIEW_SNIPPETS = 120;
 const MAX_NEGATIVE_REVIEW_SNIPPETS = 120;
 const MAX_POSITIVE_REVIEW_SNIPPETS = 50;
-const AMAZON_NEGATIVE_REVIEW_PAGES = 10;
-const AMAZON_POSITIVE_REVIEW_PAGES = 5;
+const AMAZON_LOW_STAR_REVIEW_PAGES = 5;
+const AMAZON_REVIEW_FALLBACK_PAGES = 5;
+const AMAZON_FIVE_STAR_REVIEW_PAGES = 5;
 const PAGE_TEXT_SAMPLE_LENGTH = 4000;
 const DEFAULT_MAX_COMPLETION_TOKENS = 900;
 const DEFAULT_SYNTHESIS_MAX_TOKENS = 4200;
@@ -1036,11 +1037,19 @@ function amazonReviewUrls(productUrl = "") {
     if (!/amazon\./i.test(url.hostname)) return [];
     const base = `${url.protocol}//${url.hostname}/product-reviews/${asin}`;
     const urls = [];
-    for (let page = 1; page <= AMAZON_NEGATIVE_REVIEW_PAGES; page += 1) {
+    for (const starFilter of ["one_star", "two_star"]) {
+      for (let page = 1; page <= AMAZON_LOW_STAR_REVIEW_PAGES; page += 1) {
+        urls.push(`${base}?filterByStar=${starFilter}&reviewerType=all_reviews&pageNumber=${page}`);
+      }
+    }
+    for (let page = 1; page <= AMAZON_REVIEW_FALLBACK_PAGES; page += 1) {
       urls.push(`${base}?filterByStar=critical&reviewerType=all_reviews&pageNumber=${page}`);
     }
     urls.push(`${base}?filterByStar=three_star&reviewerType=all_reviews&pageNumber=1`);
-    for (let page = 1; page <= AMAZON_POSITIVE_REVIEW_PAGES; page += 1) {
+    for (let page = 1; page <= AMAZON_FIVE_STAR_REVIEW_PAGES; page += 1) {
+      urls.push(`${base}?filterByStar=five_star&reviewerType=all_reviews&pageNumber=${page}`);
+    }
+    for (let page = 1; page <= AMAZON_REVIEW_FALLBACK_PAGES; page += 1) {
       urls.push(`${base}?filterByStar=positive&reviewerType=all_reviews&pageNumber=${page}`);
     }
     urls.push(`${base}?sortBy=recent&reviewerType=all_reviews&pageNumber=1`);
