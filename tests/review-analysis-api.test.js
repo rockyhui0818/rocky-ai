@@ -145,7 +145,10 @@ async function testReviewAnalysisRouteAnalyzesStandaloneLinks() {
     assert.strictEqual(data.ok, true);
     assert.strictEqual(data.link_scan_results.length, 1);
     assert.strictEqual(data.review_modifier_analysis.source_note, "standalone review analysis");
-    assert.deepStrictEqual(data.review_modifier_analysis.collection_overview, ["1 link, 456 reviews, 2 snippets collected."]);
+    assert.deepStrictEqual(data.review_modifier_analysis.collection_overview, [
+      "实际采集 Review：总计 3 条；差评 1 条；好评 2 条；混合/未分桶 0 条。",
+      "1 link, 456 reviews, 2 snippets collected."
+    ]);
     assert.deepStrictEqual(data.review_modifier_analysis.negative_review_analysis, ["slow delivery creates expectation risk"]);
     assert.deepStrictEqual(data.review_modifier_analysis.positive_selling_points, ["daily quality", "safe packaging"]);
     assert.deepStrictEqual(data.review_modifier_analysis.product_improvement_suggestions, ["clarify shipping expectations"]);
@@ -153,6 +156,8 @@ async function testReviewAnalysisRouteAnalyzesStandaloneLinks() {
     assert.deepStrictEqual(data.review_modifier_analysis.evidence_summary, {
       source_count: 1,
       snippet_count: 2,
+      collected_review_count: 3,
+      mixed_snippet_count: 0,
       negative_snippet_count: 1,
       positive_snippet_count: 2,
       rating_average: 4.6,

@@ -1060,6 +1060,17 @@ function normalizeAmazonAllReviewsEntryUrl(entryUrl = "") {
   }
 }
 
+function amazonReviewBaseFromEntryUrl(entryUrl = "") {
+  if (!entryUrl) return "";
+  try {
+    const url = new URL(entryUrl);
+    if (!/amazon\./i.test(url.hostname) || !/\/product-reviews\/[A-Z0-9]{10}/i.test(url.pathname)) return "";
+    return `${url.protocol}//${url.hostname}${url.pathname}`;
+  } catch {
+    return "";
+  }
+}
+
 function extractAllReviewsEntryUrl(html = "", baseUrl = "") {
   if (!html || !baseUrl || !/amazon\./i.test(baseUrl)) return "";
   const anchors = Array.from(String(html).matchAll(/<a\b([^>]*?)>([\s\S]*?)<\/a>/gi));
@@ -1081,9 +1092,9 @@ function amazonReviewUrls(productUrl = "", options = {}) {
   try {
     const url = new URL(productUrl);
     if (!/amazon\./i.test(url.hostname)) return [];
-    const base = amazonReviewBaseUrl(url, asin);
-    const urls = [];
     const entryUrl = normalizeAmazonAllReviewsEntryUrl(options.allReviewsEntryUrl || "");
+    const base = amazonReviewBaseFromEntryUrl(entryUrl) || amazonReviewBaseUrl(url, asin);
+    const urls = [];
     if (entryUrl) urls.push(entryUrl);
     for (const starFilter of ["one_star", "two_star"]) {
       for (let page = 1; page <= AMAZON_LOW_STAR_REVIEW_PAGES; page += 1) {
@@ -1548,18 +1559,23 @@ function summarizeReviewEvidence(reviewEvidence = {}) {
       if (snippet && !positiveSnippets.includes(snippet)) positiveSnippets.push(snippet);
     }
   }
+  const collectedSnippets = [
+    ...negativeSnippets,
+    ...positiveSnippets,
+    ...snippets
+  ].filter((snippet, index, arr) => snippet && arr.indexOf(snippet) === index);
+  const bucketedSnippets = new Set([...negativeSnippets, ...positiveSnippets]);
+  const mixedSnippetCount = snippets.filter((snippet) => snippet && !bucketedSnippets.has(snippet)).length;
   return {
     source_count: allEvidence.length,
     snippet_count: snippets.length,
+    collected_review_count: collectedSnippets.length,
+    mixed_snippet_count: mixedSnippetCount,
     negative_snippet_count: negativeSnippets.length,
     positive_snippet_count: positiveSnippets.length,
     rating_average: ratings.length ? Number((ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length).toFixed(2)) : null,
     review_count_total: reviewCountTotal || null,
-    representative_snippets: [
-      ...negativeSnippets.slice(0, 12),
-      ...positiveSnippets.slice(0, 12),
-      ...snippets.slice(0, 12)
-    ].filter((snippet, index, arr) => snippet && arr.indexOf(snippet) === index).slice(0, 30),
+    representative_snippets: collectedSnippets.slice(0, 30),
     negative_snippets: negativeSnippets.slice(0, MAX_NEGATIVE_REVIEW_SNIPPETS),
     positive_snippets: positiveSnippets.slice(0, MAX_POSITIVE_REVIEW_SNIPPETS)
   };
@@ -1570,10 +1586,29 @@ function reviewEvidenceStatsText(summary = {}) {
     summary.rating_average ? `平均评分 ${summary.rating_average}` : "",
     summary.review_count_total ? `${summary.review_count_total} 条评价` : "",
     summary.source_count ? `${summary.source_count} 个链接来源` : "",
+    Number.isFinite(Number(summary.collected_review_count)) ? `实际采集 ${summary.collected_review_count} 条 review` : "",
     summary.negative_snippet_count ? `${summary.negative_snippet_count} 条差评原文` : "",
     summary.positive_snippet_count ? `${summary.positive_snippet_count} 条好评原文` : "",
-    summary.snippet_count ? `${summary.snippet_count} 条可见评论摘要` : ""
+    Number.isFinite(Number(summary.mixed_snippet_count)) ? `${summary.mixed_snippet_count} 条混合/未分桶摘要` : "",
+    summary.snippet_count ? `${summary.snippet_count} 条页面可见评论摘要` : ""
   ].filter(Boolean).join("，");
+}
+
+function reviewCollectionCountLine(summary = {}) {
+  const collected = Number(summary.collected_review_count || 0);
+  const negative = Number(summary.negative_snippet_count || 0);
+  const positive = Number(summary.positive_snippet_count || 0);
+  const mixed = Number(summary.mixed_snippet_count || 0);
+  return `实际采集 Review：总计 ${collected} 条；差评 ${negative} 条；好评 ${positive} 条；混合/未分桶 ${mixed} 条。`;
+}
+
+function mergeCollectionOverview(modelOverview = [], fallbackOverview = [], summary = {}) {
+  const countLine = reviewCollectionCountLine(summary);
+  const source = Array.isArray(modelOverview) && modelOverview.length ? modelOverview : fallbackOverview;
+  const cleaned = source
+    .filter(Boolean)
+    .filter((line) => !/^实际采集 Review：/.test(String(line)));
+  return [countLine, ...cleaned].slice(0, 8);
 }
 
 function extractLinesByHints(text = "", hints = [], fallbackLimit = 6) {
@@ -1599,8 +1634,9 @@ function buildStructuredReviewSections({
   const negativeEvidence = negativeSnippets.length ? negativeSnippets : negativeTerms;
   const positiveEvidence = positiveSnippets.length ? positiveSnippets : positiveTerms;
   const collectionOverview = [
+    reviewCollectionCountLine(summary),
     `采集来源：${summary.source_count || 0} 个链接；评分 ${summary.rating_average || "未知"}；评论总数 ${summary.review_count_total || 0}。`,
-    `原文证据：差评 ${summary.negative_snippet_count || negativeSnippets.length || 0} 条，好评 ${summary.positive_snippet_count || positiveSnippets.length || 0} 条，混合摘要 ${summary.snippet_count || snippets.length || 0} 条。`,
+    `原文证据：差评 ${summary.negative_snippet_count || negativeSnippets.length || 0} 条，好评 ${summary.positive_snippet_count || positiveSnippets.length || 0} 条，混合/未分桶 ${summary.mixed_snippet_count || 0} 条，页面可见摘要 ${summary.snippet_count || snippets.length || 0} 条。`,
     statsText ? `证据强度：${statsText}。` : "证据强度：当前只基于可见评论原文和页面评分。"
   ];
   const negativeAnalysis = negativeEvidence.length
@@ -1665,7 +1701,7 @@ function normalizeReviewModifierAnalysis(value = {}, reviewEvidence = {}) {
   return {
     ...fallback,
     ...value,
-    collection_overview: Array.isArray(value.collection_overview) && value.collection_overview.length ? value.collection_overview : fallback.collection_overview,
+    collection_overview: mergeCollectionOverview(value.collection_overview, fallback.collection_overview, summary),
     negative_review_analysis: Array.isArray(value.negative_review_analysis) && value.negative_review_analysis.length ? value.negative_review_analysis : fallback.negative_review_analysis,
     positive_selling_points: Array.isArray(value.positive_selling_points) && value.positive_selling_points.length ? value.positive_selling_points : fallback.positive_selling_points,
     product_improvement_suggestions: Array.isArray(value.product_improvement_suggestions) && value.product_improvement_suggestions.length ? value.product_improvement_suggestions : fallback.product_improvement_suggestions,
@@ -1776,6 +1812,8 @@ function fallbackReviewModifierAnalysis(reviewEvidence = {}) {
     evidence_summary: {
       source_count: summary.source_count || allEvidence.length,
       snippet_count: summary.snippet_count || snippets.length,
+      collected_review_count: summary.collected_review_count || evidenceSnippets.length,
+      mixed_snippet_count: summary.mixed_snippet_count || 0,
       negative_snippet_count: summary.negative_snippet_count || negativeSnippets.length,
       positive_snippet_count: summary.positive_snippet_count || positiveSnippets.length,
       rating_average: summary.rating_average || null,

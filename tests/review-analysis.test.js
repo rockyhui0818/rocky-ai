@@ -324,6 +324,78 @@ async function testAmazonAllReviewsEntryLinkIsFetchedBeforeReviewPagination() {
   }
 }
 
+async function testAmazonStarPaginationUsesAllReviewsEntryPath() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY,
+    BRIGHTDATA_ZONE: process.env.BRIGHTDATA_ZONE,
+    BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS
+  };
+  const previousFetch = global.fetch;
+  const calls = [];
+
+  process.env.NODE_ENV = "test";
+  process.env.BRIGHTDATA_API_KEY = "brd-test";
+  process.env.BRIGHTDATA_ZONE = "web_unlocker1";
+  process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "200";
+
+  global.fetch = async (url, options = {}) => {
+    assert.strictEqual(String(url), "https://api.brightdata.com/request");
+    const body = JSON.parse(options.body || "{}");
+    calls.push(body.url);
+    const target = String(body.url);
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ/ref=cm_cr_dp_d_show_all_btm")) {
+      return new Response(`
+        <html><body>
+          <div data-hook="review">
+            <span data-hook="review-body">All reviews path sample: package arrived damaged, refund requested, hard to use daily.</span>
+          </div>
+        </body></html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ")) {
+      return new Response("<html><body></body></html>", { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    return new Response(`
+      <html>
+        <head><title>Hismile Whitening Treatment</title></head>
+        <body>
+          <span itemprop="ratingValue" content="4.2"></span>
+          <span itemprop="reviewCount" content="2700"></span>
+          <div id="reviews-medley-footer">
+            <a data-hook="see-all-reviews-link-foot" href="/product-reviews/B0F42ZTSZZ/ref=cm_cr_dp_d_show_all_btm?ie=UTF8&reviewerType=all_reviews">See all reviews</a>
+          </div>
+          <div id="landingImage" data-a-dynamic-image='{"https://m.media-amazon.com/images/I/main.jpg":[1000,1000]}'></div>
+        </body>
+      </html>
+    `, { status: 200, headers: { "Content-Type": "text/html" } });
+  };
+
+  try {
+    clearApiModule();
+    const { scanProductLink } = require(path.join(root, "api/generate.js"));
+    const result = await scanProductLink(
+      "https://www.amazon.com/Hismile-Whitening-Treatment-Combining-Correction/dp/B0F42ZTSZZ?ref_=ast_sto_dp&th=1",
+      { market: "us" }
+    );
+
+    const starCalls = calls.filter((url) => String(url).includes("filterByStar="));
+    assert(starCalls.length, `expected star pagination calls, got ${JSON.stringify(calls)}`);
+    assert(
+      starCalls.every((url) => String(url).includes("/product-reviews/B0F42ZTSZZ/ref=cm_cr_dp_d_show_all_btm?")),
+      `expected star pagination to stay under all reviews entry path, got ${JSON.stringify(starCalls.slice(0, 8))}`
+    );
+    assert.match(result.review_insights.negative_snippets.join(" "), /All reviews path sample/);
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModule();
+  }
+}
+
 async function testAmazonNegativeReviewPagesArePrioritized() {
   const previousEnv = {
     NODE_ENV: process.env.NODE_ENV,
@@ -1118,9 +1190,15 @@ async function testReviewEvidenceIsSentToModelAnalysis() {
     );
     assert.strictEqual(result.result.review_modifier_analysis.source_note, "gpt-5.5 analyzed full review evidence");
     assert.match(result.result.review_modifier_analysis.review_summary, /visible whitening/);
+    assert.match(
+      result.result.review_modifier_analysis.collection_overview.join(" "),
+      /实际采集 Review：总计 2 条；差评 1 条；好评 1 条；混合\/未分桶 0 条/
+    );
     assert.deepStrictEqual(result.result.review_modifier_analysis.evidence_summary, {
       source_count: 1,
       snippet_count: 2,
+      collected_review_count: 2,
+      mixed_snippet_count: 0,
       negative_snippet_count: 1,
       positive_snippet_count: 1,
       rating_average: 4.5,
@@ -1188,6 +1266,8 @@ async function testRatingOnlyReviewEvidenceStillShowsConcreteStats() {
     assert.deepStrictEqual(review.evidence_summary, {
       source_count: 1,
       snippet_count: 0,
+      collected_review_count: 0,
+      mixed_snippet_count: 0,
       negative_snippet_count: 0,
       positive_snippet_count: 0,
       rating_average: 4.7,
@@ -1283,6 +1363,10 @@ async function testFallbackReviewModifierUsesRequiredFiveSections() {
     }
     assert.match(review.negative_review_analysis.join(" "), /Battery failed|Package arrived damaged/);
     assert.match(review.positive_selling_points.join(" "), /Great quality|Excellent value/);
+    assert.match(
+      review.collection_overview.join(" "),
+      /实际采集 Review：总计 5 条；差评 2 条；好评 3 条；混合\/未分桶 0 条/
+    );
     assert.match(review.listing_optimization_prompts.join(" "), /图片|listing|详情页/i);
   } finally {
     global.fetch = previousFetch;
@@ -1351,6 +1435,7 @@ async function run() {
   await testAmazonReviewPageIsFetchedWhenProductPageHasOnlyReviewCount();
   await testAmazonBrazilReviewUrlsUseRecentPaginatedReviewPath();
   await testAmazonAllReviewsEntryLinkIsFetchedBeforeReviewPagination();
+  await testAmazonStarPaginationUsesAllReviewsEntryPath();
   await testAmazonNegativeReviewPagesArePrioritized();
   await testAmazonPositiveReviewPagesFeedHighQualitySellingPoints();
   await testAmazonReviewPagesAreFetchedEvenWhenProductPageHasFewSnippets();
