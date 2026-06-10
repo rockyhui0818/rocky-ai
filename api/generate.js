@@ -10,7 +10,11 @@ const MAX_IMAGE_CANDIDATES = 15;
 const MAX_MAIN_IMAGE_CANDIDATES = 8;
 const MAX_DETAIL_IMAGE_CANDIDATES = 7;
 const MAX_HEADINGS = 10;
-const MAX_REVIEW_SNIPPETS = 30;
+const MAX_REVIEW_SNIPPETS = 120;
+const MAX_NEGATIVE_REVIEW_SNIPPETS = 120;
+const MAX_POSITIVE_REVIEW_SNIPPETS = 50;
+const AMAZON_NEGATIVE_REVIEW_PAGES = 10;
+const AMAZON_POSITIVE_REVIEW_PAGES = 5;
 const PAGE_TEXT_SAMPLE_LENGTH = 4000;
 const DEFAULT_MAX_COMPLETION_TOKENS = 900;
 const DEFAULT_SYNTHESIS_MAX_TOKENS = 4200;
@@ -902,36 +906,98 @@ function countTerms(text, terms) {
     .slice(0, 10);
 }
 
-function extractReviewInsights(html, platformKey = "generic") {
+const POSITIVE_REVIEW_TERMS = [
+  "quality", "easy", "durable", "recommend", "comfortable", "great", "excellent",
+  "qualidade", "fácil", "durável", "recomendo", "confortável", "ótimo", "excelente", "bom", "boa"
+];
+const NEGATIVE_REVIEW_TERMS = [
+  "small", "large", "size", "broken", "hard", "difficult", "package", "packaging", "shipping", "delivery",
+  "damaged", "crushed", "dry", "slipped", "faded", "last", "sensitivity", "pain", "return", "refund",
+  "pequeno", "grande", "tamanho", "quebrado", "difícil", "embalagem", "entrega", "ruim", "fraco"
+];
+const SCENE_REVIEW_TERMS = [
+  "home", "office", "travel", "outdoor", "daily", "family", "work", "event", "routine",
+  "casa", "escritório", "viagem", "rua", "dia a dia", "família", "trabalho"
+];
+
+function dedupeLimited(values = [], limit = MAX_REVIEW_SNIPPETS) {
+  const result = [];
+  for (const value of values) {
+    if (result.length >= limit) break;
+    const text = cleanReviewText(value, 260);
+    if (text && !result.includes(text)) result.push(text);
+  }
+  return result;
+}
+
+function reviewSentimentBucketFromUrl(url = "") {
+  const value = String(url || "").toLowerCase();
+  if (/filterbystar=(critical|one_star|two_star|three_star)/i.test(value)) return "negative";
+  if (/filterbystar=(positive|four_star|five_star)/i.test(value)) return "positive";
+  return "mixed";
+}
+
+function classifyReviewSnippet(snippet = "") {
+  const text = String(snippet || "").toLowerCase();
+  const positiveHits = POSITIVE_REVIEW_TERMS.filter((term) => text.includes(term.toLowerCase())).length;
+  const negativeHits = NEGATIVE_REVIEW_TERMS.filter((term) => text.includes(term.toLowerCase())).length;
+  if (negativeHits > positiveHits) return "negative";
+  if (positiveHits > 0) return "positive";
+  return "mixed";
+}
+
+function bucketReviewSnippets(snippets = [], forcedBucket = "mixed") {
+  if (forcedBucket === "negative") {
+    return {
+      negative_snippets: dedupeLimited(snippets, MAX_NEGATIVE_REVIEW_SNIPPETS),
+      positive_snippets: []
+    };
+  }
+  if (forcedBucket === "positive") {
+    return {
+      negative_snippets: [],
+      positive_snippets: dedupeLimited(snippets, MAX_POSITIVE_REVIEW_SNIPPETS)
+    };
+  }
+  const negative = [];
+  const positive = [];
+  for (const snippet of snippets) {
+    const bucket = classifyReviewSnippet(snippet);
+    if (bucket === "negative" && negative.length < MAX_NEGATIVE_REVIEW_SNIPPETS && !negative.includes(snippet)) negative.push(snippet);
+    if (bucket === "positive" && positive.length < MAX_POSITIVE_REVIEW_SNIPPETS && !positive.includes(snippet)) positive.push(snippet);
+  }
+  return {
+    negative_snippets: negative,
+    positive_snippets: positive
+  };
+}
+
+function extractReviewInsights(html, platformKey = "generic", options = {}) {
   const snippets = extractPlatformReviewSnippets(html, platformKey);
   const reviewText = snippets.join(" ");
   const rating = extractRating(html);
   const reviewCount = extractReviewCount(html);
   if (!rating && !reviewCount && !snippets.length) return null;
+  const bucketed = bucketReviewSnippets(snippets, options.sentimentBucket || "mixed");
   return {
     rating,
     review_count: reviewCount,
     snippets,
-    positive_terms: countTerms(reviewText, [
-      "quality", "easy", "durable", "recommend", "comfortable", "great", "excellent",
-      "qualidade", "fácil", "durável", "recomendo", "confortável", "ótimo", "excelente", "bom", "boa"
-    ]),
-    negative_terms: countTerms(reviewText, [
-      "small", "large", "size", "broken", "hard", "difficult", "package", "shipping", "delivery",
-      "pequeno", "grande", "tamanho", "quebrado", "difícil", "embalagem", "entrega", "ruim", "fraco"
-    ]),
-    scene_terms: countTerms(reviewText, [
-      "home", "office", "travel", "outdoor", "daily", "family", "work",
-      "casa", "escritório", "viagem", "rua", "dia a dia", "família", "trabalho"
-    ])
+    negative_snippets: bucketed.negative_snippets,
+    positive_snippets: bucketed.positive_snippets,
+    positive_terms: countTerms(reviewText, POSITIVE_REVIEW_TERMS),
+    negative_terms: countTerms(reviewText, NEGATIVE_REVIEW_TERMS),
+    scene_terms: countTerms(reviewText, SCENE_REVIEW_TERMS)
   };
 }
 
 function shouldFetchSupplementalReviewInsights(reviewInsights = null, platformKey = "generic") {
   const snippetCount = Array.isArray(reviewInsights?.snippets) ? reviewInsights.snippets.length : 0;
+  const negativeCount = Array.isArray(reviewInsights?.negative_snippets) ? reviewInsights.negative_snippets.length : 0;
+  const positiveCount = Array.isArray(reviewInsights?.positive_snippets) ? reviewInsights.positive_snippets.length : 0;
   const reviewCount = Number(reviewInsights?.review_count || 0);
   if (!reviewInsights) return true;
-  if (platformKey === "amazon" && reviewCount >= 20 && snippetCount < MAX_REVIEW_SNIPPETS) return true;
+  if (platformKey === "amazon" && reviewCount >= 20 && (negativeCount < 20 || positiveCount < MAX_POSITIVE_REVIEW_SNIPPETS)) return true;
   return snippetCount < 3;
 }
 
@@ -969,13 +1035,16 @@ function amazonReviewUrls(productUrl = "") {
     const url = new URL(productUrl);
     if (!/amazon\./i.test(url.hostname)) return [];
     const base = `${url.protocol}//${url.hostname}/product-reviews/${asin}`;
-    return [
-      `${base}?filterByStar=critical&reviewerType=all_reviews&pageNumber=1`,
-      `${base}?filterByStar=critical&reviewerType=all_reviews&pageNumber=2`,
-      `${base}?filterByStar=three_star&reviewerType=all_reviews&pageNumber=1`,
-      `${base}?filterByStar=positive&reviewerType=all_reviews&pageNumber=1`,
-      `${base}?sortBy=recent&reviewerType=all_reviews&pageNumber=1`
-    ];
+    const urls = [];
+    for (let page = 1; page <= AMAZON_NEGATIVE_REVIEW_PAGES; page += 1) {
+      urls.push(`${base}?filterByStar=critical&reviewerType=all_reviews&pageNumber=${page}`);
+    }
+    urls.push(`${base}?filterByStar=three_star&reviewerType=all_reviews&pageNumber=1`);
+    for (let page = 1; page <= AMAZON_POSITIVE_REVIEW_PAGES; page += 1) {
+      urls.push(`${base}?filterByStar=positive&reviewerType=all_reviews&pageNumber=${page}`);
+    }
+    urls.push(`${base}?sortBy=recent&reviewerType=all_reviews&pageNumber=1`);
+    return urls;
   } catch {
     return [];
   }
@@ -998,33 +1067,22 @@ function mergeReviewInsights(primary = null, extra = null) {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
   };
-  const snippets = [];
-  for (const snippet of [...(base.snippets || []), ...(addition.snippets || [])]) {
-    if (snippet && !snippets.includes(snippet)) snippets.push(snippet);
-  }
-  const reviewText = snippets.join(" ");
+  const snippets = dedupeLimited([...(base.snippets || []), ...(addition.snippets || [])], MAX_REVIEW_SNIPPETS);
+  const negativeSnippets = dedupeLimited([...(base.negative_snippets || []), ...(addition.negative_snippets || [])], MAX_NEGATIVE_REVIEW_SNIPPETS);
+  const positiveSnippets = dedupeLimited([...(base.positive_snippets || []), ...(addition.positive_snippets || [])], MAX_POSITIVE_REVIEW_SNIPPETS);
+  const reviewText = [...snippets, ...negativeSnippets, ...positiveSnippets].join(" ");
+  const positiveTerms = mergeTerms(base.positive_terms, addition.positive_terms);
+  const negativeTerms = mergeTerms(base.negative_terms, addition.negative_terms);
+  const sceneTerms = mergeTerms(base.scene_terms, addition.scene_terms);
   return {
     rating: base.rating || addition.rating || null,
     review_count: base.review_count || addition.review_count || null,
-    snippets: snippets.slice(0, MAX_REVIEW_SNIPPETS),
-    positive_terms: mergeTerms(base.positive_terms, addition.positive_terms).length
-      ? mergeTerms(base.positive_terms, addition.positive_terms)
-      : countTerms(reviewText, [
-          "quality", "easy", "durable", "recommend", "comfortable", "great", "excellent",
-          "qualidade", "fácil", "durável", "recomendo", "confortável", "ótimo", "excelente", "bom", "boa"
-        ]),
-    negative_terms: mergeTerms(base.negative_terms, addition.negative_terms).length
-      ? mergeTerms(base.negative_terms, addition.negative_terms)
-      : countTerms(reviewText, [
-          "small", "large", "size", "broken", "hard", "difficult", "package", "shipping", "delivery",
-          "pequeno", "grande", "tamanho", "quebrado", "difícil", "embalagem", "entrega", "ruim", "fraco"
-        ]),
-    scene_terms: mergeTerms(base.scene_terms, addition.scene_terms).length
-      ? mergeTerms(base.scene_terms, addition.scene_terms)
-      : countTerms(reviewText, [
-          "home", "office", "travel", "outdoor", "daily", "family", "work",
-          "casa", "escritório", "viagem", "rua", "dia a dia", "família", "trabalho"
-        ])
+    snippets,
+    negative_snippets: negativeSnippets,
+    positive_snippets: positiveSnippets,
+    positive_terms: positiveTerms.length ? positiveTerms : countTerms(reviewText, POSITIVE_REVIEW_TERMS),
+    negative_terms: negativeTerms.length ? negativeTerms : countTerms(reviewText, NEGATIVE_REVIEW_TERMS),
+    scene_terms: sceneTerms.length ? sceneTerms : countTerms(reviewText, SCENE_REVIEW_TERMS)
   };
 }
 
@@ -1033,11 +1091,15 @@ async function fetchSupplementalReviewInsights(url, signal) {
   if (!reviewUrls.length || !process.env.BRIGHTDATA_API_KEY) return null;
   let merged = null;
   for (const reviewUrl of reviewUrls) {
-    if (merged?.snippets?.length >= MAX_REVIEW_SNIPPETS) break;
+    const negativeFull = (merged?.negative_snippets?.length || 0) >= MAX_NEGATIVE_REVIEW_SNIPPETS;
+    const positiveFull = (merged?.positive_snippets?.length || 0) >= MAX_POSITIVE_REVIEW_SNIPPETS;
+    if (negativeFull && positiveFull) break;
     try {
       const { response, html } = await fetchProductHtml(reviewUrl, signal);
       if (!response.ok || isBotProtectionPage(html, response.url)) continue;
-      merged = mergeReviewInsights(merged, extractReviewInsights(html));
+      merged = mergeReviewInsights(merged, extractReviewInsights(html, "amazon", {
+        sentimentBucket: reviewSentimentBucketFromUrl(reviewUrl)
+      }));
     } catch {
       continue;
     }
@@ -1349,6 +1411,8 @@ function hasReviewEvidence(insights = {}) {
       insights.rating ||
       insights.review_count ||
       (Array.isArray(insights.snippets) && insights.snippets.length) ||
+      (Array.isArray(insights.negative_snippets) && insights.negative_snippets.length) ||
+      (Array.isArray(insights.positive_snippets) && insights.positive_snippets.length) ||
       (Array.isArray(insights.positive_terms) && insights.positive_terms.length) ||
       (Array.isArray(insights.negative_terms) && insights.negative_terms.length) ||
       (Array.isArray(insights.scene_terms) && insights.scene_terms.length)
@@ -1370,6 +1434,8 @@ function buildReviewModifierEvidence(scanResults = []) {
 function summarizeReviewEvidence(reviewEvidence = {}) {
   const allEvidence = [...(reviewEvidence.us || []), ...(reviewEvidence.brazil || []), ...(reviewEvidence.other || [])];
   const snippets = [];
+  const negativeSnippets = [];
+  const positiveSnippets = [];
   let reviewCountTotal = 0;
   const ratings = [];
   for (const item of allEvidence) {
@@ -1379,13 +1445,27 @@ function summarizeReviewEvidence(reviewEvidence = {}) {
     for (const snippet of insights.snippets || []) {
       if (snippet && !snippets.includes(snippet)) snippets.push(snippet);
     }
+    for (const snippet of insights.negative_snippets || []) {
+      if (snippet && !negativeSnippets.includes(snippet)) negativeSnippets.push(snippet);
+    }
+    for (const snippet of insights.positive_snippets || []) {
+      if (snippet && !positiveSnippets.includes(snippet)) positiveSnippets.push(snippet);
+    }
   }
   return {
     source_count: allEvidence.length,
     snippet_count: snippets.length,
+    negative_snippet_count: negativeSnippets.length,
+    positive_snippet_count: positiveSnippets.length,
     rating_average: ratings.length ? Number((ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length).toFixed(2)) : null,
     review_count_total: reviewCountTotal || null,
-    representative_snippets: snippets.slice(0, MAX_REVIEW_SNIPPETS)
+    representative_snippets: [
+      ...negativeSnippets.slice(0, 12),
+      ...positiveSnippets.slice(0, 12),
+      ...snippets.slice(0, 12)
+    ].filter((snippet, index, arr) => snippet && arr.indexOf(snippet) === index).slice(0, 30),
+    negative_snippets: negativeSnippets.slice(0, MAX_NEGATIVE_REVIEW_SNIPPETS),
+    positive_snippets: positiveSnippets.slice(0, MAX_POSITIVE_REVIEW_SNIPPETS)
   };
 }
 
@@ -1394,6 +1474,8 @@ function reviewEvidenceStatsText(summary = {}) {
     summary.rating_average ? `平均评分 ${summary.rating_average}` : "",
     summary.review_count_total ? `${summary.review_count_total} 条评价` : "",
     summary.source_count ? `${summary.source_count} 个链接来源` : "",
+    summary.negative_snippet_count ? `${summary.negative_snippet_count} 条差评原文` : "",
+    summary.positive_snippet_count ? `${summary.positive_snippet_count} 条好评原文` : "",
     summary.snippet_count ? `${summary.snippet_count} 条可见评论摘要` : ""
   ].filter(Boolean).join("，");
 }
@@ -1473,35 +1555,48 @@ function fallbackReviewModifierAnalysis(reviewEvidence = {}) {
   const negativeTerms = [];
   const sceneTerms = [];
   const snippets = [];
+  const negativeSnippets = [];
+  const positiveSnippets = [];
   for (const item of allEvidence) {
     const insights = item.review_insights || {};
     for (const term of insights.positive_terms || []) if (term?.term && !positiveTerms.includes(term.term)) positiveTerms.push(term.term);
     for (const term of insights.negative_terms || []) if (term?.term && !negativeTerms.includes(term.term)) negativeTerms.push(term.term);
     for (const term of insights.scene_terms || []) if (term?.term && !sceneTerms.includes(term.term)) sceneTerms.push(term.term);
     for (const snippet of insights.snippets || []) if (snippet && !snippets.includes(snippet)) snippets.push(snippet);
+    for (const snippet of insights.negative_snippets || []) if (snippet && !negativeSnippets.includes(snippet)) negativeSnippets.push(snippet);
+    for (const snippet of insights.positive_snippets || []) if (snippet && !positiveSnippets.includes(snippet)) positiveSnippets.push(snippet);
   }
+  const evidenceSnippets = [
+    ...negativeSnippets,
+    ...positiveSnippets,
+    ...snippets
+  ].filter((snippet, index, arr) => snippet && arr.indexOf(snippet) === index);
   const hasStrongStats = Number(summary.review_count_total || 0) >= 100 || Number(summary.rating_average || 0) >= 4;
+  const negativeEvidence = negativeSnippets.length ? negativeSnippets : negativeTerms;
+  const positiveEvidence = positiveSnippets.length ? positiveSnippets : positiveTerms;
   const inferredPraise = [
-    ...positiveTerms,
+    ...positiveEvidence,
     ...(summary.rating_average ? [`评分 ${summary.rating_average} 表明整体满意度可作为卖点排序参考。`] : []),
     ...(summary.review_count_total ? [`${summary.review_count_total} 条评价说明该链接有足够市场反馈，可用于判断消费者关注点。`] : [])
   ].filter(Boolean);
   const inferredPainPoints = [
-    ...negativeTerms,
-    "未采集到足够评论原文，详情页需要主动解释规格、包装、配送、适用场景和售后，避免消费者疑虑。",
+    ...negativeEvidence,
+    negativeSnippets.length
+      ? "以上差评原文需要优先转化为详情页 FAQ、规格解释、包装/配送预期和使用步骤说明。"
+      : "未采集到足够评论原文，详情页需要主动解释规格、包装、配送、适用场景和售后，避免消费者疑虑。",
     hasStrongStats
       ? "评分和评论数只能证明整体反馈强度，不能替代具体用户原话；页面文案需要避免伪造评论。"
       : "评分/评论数信号有限，需要用清晰规格和真实产品图降低购买不确定性。"
   ].filter(Boolean);
   const inferredBarriers = [
-    ...negativeTerms.map((term) => `${term} 相关疑虑需要在详情页提前解释。`),
+    ...negativeEvidence.slice(0, 8).map((term) => `${term} 相关疑虑需要在详情页提前解释。`),
     "消费者可能看不到具体评论细节，因此会担心效果、尺寸、材质、包装或配送是否符合预期。",
     "如果只展示评分数量而没有评论原文，卖点图需要用事实化规格和使用步骤补足信任。"
   ];
   return {
     analysis_method: "fallback-review-terms",
-    review_summary: snippets.length
-      ? `已采集 ${summary.snippet_count || snippets.length} 条可见 review 摘要${statsText ? `，${statsText}` : ""}，规则降级提取好评、差评和使用场景信号。`
+    review_summary: evidenceSnippets.length
+      ? `已采集 ${summary.snippet_count || snippets.length} 条可见 review 摘要，其中差评原文 ${negativeSnippets.length} 条、好评原文 ${positiveSnippets.length} 条${statsText ? `，${statsText}` : ""}；规则降级优先提取差评痛点，再用好评统计卖点。`
       : `未采集到足够 review 原文，已基于${statsText || "评分、评论数和关键词信号"}生成可执行 Review Modifier：优先把评分/评论量作为信任强度参考，同时用详情页解释规格、包装、配送和售后疑虑。`,
     sentiment_breakdown: {
       positive: inferredPraise.slice(0, 8),
@@ -1510,7 +1605,7 @@ function fallbackReviewModifierAnalysis(reviewEvidence = {}) {
     },
     customer_pain_points: inferredPainPoints.slice(0, 8),
     purchase_barriers: inferredBarriers.slice(0, 8),
-    customer_language_examples: snippets.slice(0, 8),
+    customer_language_examples: evidenceSnippets.slice(0, 8),
     high_frequency_praise: inferredPraise.slice(0, 5),
     high_frequency_complaints: inferredPainPoints.slice(0, 5),
     local_language: [...positiveTerms, ...negativeTerms].slice(0, 8),
@@ -1527,10 +1622,12 @@ function fallbackReviewModifierAnalysis(reviewEvidence = {}) {
     evidence_summary: {
       source_count: summary.source_count || allEvidence.length,
       snippet_count: summary.snippet_count || snippets.length,
+      negative_snippet_count: summary.negative_snippet_count || negativeSnippets.length,
+      positive_snippet_count: summary.positive_snippet_count || positiveSnippets.length,
       rating_average: summary.rating_average || null,
       review_count_total: summary.review_count_total || null
     },
-    source_note: snippets.length ? `基于 ${allEvidence.length} 条链接 review 信号和可见评论摘要。` : "未提取到足够 review 摘要，仅使用评分/关键词信号。"
+    source_note: evidenceSnippets.length ? `基于 ${allEvidence.length} 条链接 review 信号、差评桶和好评桶的可见评论原文。` : "未提取到足够 review 摘要，仅使用评分/关键词信号。"
   };
 }
 
@@ -1868,11 +1965,12 @@ function buildSingleImageAnalysisPrompt({ unit, product }) {
 function buildReviewModifierPrompt({ reviewEvidence, product }) {
   return [
     "任务：只分析 review 信号；使用 ChatGPT gpt-5.5 对整体 review 数据做结构化分析，再把结论变成最终图片提示词的修饰层。不要分析图片，不要改变产品外观。",
-    "必须把 review_evidence.overall_review_data、各链接 review_insights.snippets、rating、review_count、positive_terms、negative_terms、scene_terms 作为整体 review 数据一起分析；不要只做关键词罗列。",
-    "优先分析差评和低星评论：先提炼不满意原因、购买阻碍、效果/尺寸/包装/配送/使用难度/预期落差，再补充好评卖点；差评结论必须转化为详情页 FAQ、规格解释、使用步骤和风险预防文案。",
-    "优质评价用于统计优质卖点：从高星/好评原文中统计反复出现的好评原因、用户自然表达、真实使用场景和可转化卖点，输出到 high_frequency_praise、local_language、usage_scenarios 和 prompt_modifiers.main_images。",
+    "必须把 review_evidence.overall_review_data、各链接 review_insights.snippets、review_insights.negative_snippets、review_insights.positive_snippets、rating、review_count、positive_terms、negative_terms、scene_terms 作为整体 review 数据一起分析；不要只做关键词罗列。",
+    "优先分析差评和低星评论：negative_snippets 是低星/差评原文桶，优先级最高；先提炼不满意原因、购买阻碍、效果/尺寸/包装/配送/使用难度/预期落差；差评结论必须转化为详情页 FAQ、规格解释、使用步骤和风险预防文案。",
+    "优质评价用于统计优质卖点：positive_snippets 是高星/好评原文桶，最多 50 条；从好评原文中统计反复出现的好评原因、用户自然表达、真实使用场景和可转化卖点，输出到 high_frequency_praise、local_language、usage_scenarios 和 prompt_modifiers.main_images。",
+    "如果 negative_snippets 或 positive_snippets 有内容，禁止输出“未采集到足够评论原文”；必须基于这些原文给出具体结论。",
     "Review 权重低于上传产品图和美国链接图片结构；只能用于：卖点措辞校准、巴西葡语自然表达、真实使用场景、差评预防、竞品弱点补充。",
-    "输出 JSON：{analysis_method,review_summary,sentiment_breakdown:{positive:[最多8条],negative:[最多8条],neutral:[最多6条]},customer_pain_points:[最多8条],purchase_barriers:[最多8条],customer_language_examples:[最多8条],high_frequency_praise:[最多8条],high_frequency_complaints:[最多8条],local_language:[最多12个],usage_scenarios:[最多8条],competitor_weaknesses:[最多8条],prompt_modifiers:{main_images:[最多8条],detail_pages:[最多8条],negative_constraints:[最多6条]},evidence_summary:{source_count,snippet_count,rating_average,review_count_total},source_note}。",
+    "输出 JSON：{analysis_method,review_summary,sentiment_breakdown:{positive:[最多8条],negative:[最多8条],neutral:[最多6条]},customer_pain_points:[最多8条],purchase_barriers:[最多8条],customer_language_examples:[最多8条],high_frequency_praise:[最多8条],high_frequency_complaints:[最多8条],local_language:[最多12个],usage_scenarios:[最多8条],competitor_weaknesses:[最多8条],prompt_modifiers:{main_images:[最多8条],detail_pages:[最多8条],negative_constraints:[最多6条]},evidence_summary:{source_count,snippet_count,negative_snippet_count,positive_snippet_count,rating_average,review_count_total},source_note}。",
     "review_summary 必须是模型对整体 review 的具体结论；customer_pain_points 和 purchase_barriers 必须来自 review 原文/评分/评论数综合判断；customer_language_examples 必须保留用户原话或贴近原文的短句。",
     JSON.stringify({ product: compactProduct(product), review_evidence: reviewEvidence })
   ].join("\n");

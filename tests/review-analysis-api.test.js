@@ -109,6 +109,8 @@ async function testReviewAnalysisRouteAnalyzesStandaloneLinks() {
               evidence_summary: {
                 source_count: 1,
                 snippet_count: 2,
+                negative_snippet_count: 1,
+                positive_snippet_count: 2,
                 rating_average: 4.6,
                 review_count_total: 456
               },
@@ -141,6 +143,8 @@ async function testReviewAnalysisRouteAnalyzesStandaloneLinks() {
     assert.deepStrictEqual(data.review_modifier_analysis.evidence_summary, {
       source_count: 1,
       snippet_count: 2,
+      negative_snippet_count: 1,
+      positive_snippet_count: 2,
       rating_average: 4.6,
       review_count_total: 456
     });

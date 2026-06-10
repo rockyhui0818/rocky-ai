@@ -1722,6 +1722,8 @@ function bindReviewAnalysisControls() {
 function renderReviewSourceEvidence(scan = {}) {
   const reviews = scan.review_insights || {};
   const snippets = Array.isArray(reviews.snippets) ? reviews.snippets : [];
+  const negativeSnippets = Array.isArray(reviews.negative_snippets) ? reviews.negative_snippets : [];
+  const positiveSnippets = Array.isArray(reviews.positive_snippets) ? reviews.positive_snippets : [];
   const terms = (items = []) => items.slice(0, 8).map((item) => typeof item === "string" ? item : `${item.term || ""}${item.count ? ` (${item.count})` : ""}`).filter(Boolean);
   return `
     <article class="scan-evidence-card review-source-card">
@@ -1731,10 +1733,14 @@ function renderReviewSourceEvidence(scan = {}) {
         ${reviews.rating ? `<em>${escapeHtml(`评分 ${reviews.rating}`)}</em>` : ""}
         ${reviews.review_count ? `<em>${escapeHtml(`${reviews.review_count} 条评价`)}</em>` : ""}
         ${snippets.length ? `<em>${escapeHtml(`${snippets.length} 条摘要`)}</em>` : ""}
+        ${negativeSnippets.length ? `<em>${escapeHtml(`${negativeSnippets.length} 条差评原文`)}</em>` : ""}
+        ${positiveSnippets.length ? `<em>${escapeHtml(`${positiveSnippets.length} 条好评原文`)}</em>` : ""}
       </div>
       ${terms(reviews.positive_terms).length ? `<p><b>好评信号：</b>${escapeHtml(terms(reviews.positive_terms).join(" / "))}</p>` : ""}
       ${terms(reviews.negative_terms).length ? `<p><b>差评信号：</b>${escapeHtml(terms(reviews.negative_terms).join(" / "))}</p>` : ""}
       ${terms(reviews.scene_terms).length ? `<p><b>场景信号：</b>${escapeHtml(terms(reviews.scene_terms).join(" / "))}</p>` : ""}
+      ${negativeSnippets.length ? `<p><b>差评原文桶：</b>${escapeHtml(`${negativeSnippets.length} 条，优先用于痛点、购买阻碍和差评预防。`)}</p><ul>${negativeSnippets.slice(0, 12).map((snippet) => `<li>${escapeHtml(snippet)}</li>`).join("")}</ul>` : ""}
+      ${positiveSnippets.length ? `<p><b>好评原文桶：</b>${escapeHtml(`${positiveSnippets.length} 条，最多保留 50 条用于卖点统计。`)}</p><ul>${positiveSnippets.slice(0, 12).map((snippet) => `<li>${escapeHtml(snippet)}</li>`).join("")}</ul>` : ""}
       ${snippets.length ? `<ul>${snippets.slice(0, 12).map((snippet) => `<li>${escapeHtml(snippet)}</li>`).join("")}</ul>` : `<p>该链接只有评分/评论数，未采集到可见评论正文。</p>`}
     </article>
   `;
@@ -1763,6 +1769,8 @@ function hasReviewEvidence(insights = {}) {
       insights.rating ||
       insights.review_count ||
       (Array.isArray(insights.snippets) && insights.snippets.length) ||
+      (Array.isArray(insights.positive_snippets) && insights.positive_snippets.length) ||
+      (Array.isArray(insights.negative_snippets) && insights.negative_snippets.length) ||
       (Array.isArray(insights.positive_terms) && insights.positive_terms.length) ||
       (Array.isArray(insights.negative_terms) && insights.negative_terms.length) ||
       (Array.isArray(insights.scene_terms) && insights.scene_terms.length)
@@ -1799,6 +1807,8 @@ function renderScanEvidenceItem(scan) {
     scan.platform_name || scope.platform_name ? `平台识别：${scan.platform_name || scope.platform_name}` : "",
     reviews.rating ? `评分 ${reviews.rating}` : "",
     reviews.review_count ? `${reviews.review_count} 条评价` : "",
+    Array.isArray(reviews.negative_snippets) && reviews.negative_snippets.length ? `差评原文 ${reviews.negative_snippets.length} 条` : "",
+    Array.isArray(reviews.positive_snippets) && reviews.positive_snippets.length ? `好评原文 ${reviews.positive_snippets.length} 条` : "",
     Array.isArray(reviews.positive_terms) && reviews.positive_terms.length ? `好评词：${reviews.positive_terms.slice(0, 4).map((item) => item.term).join(" / ")}` : "",
     Array.isArray(reviews.negative_terms) && reviews.negative_terms.length ? `差评词：${reviews.negative_terms.slice(0, 4).map((item) => item.term).join(" / ")}` : ""
   ].filter(Boolean);

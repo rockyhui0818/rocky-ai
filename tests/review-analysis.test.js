@@ -451,6 +451,87 @@ async function testAmazonReviewPagesAreFetchedEvenWhenProductPageHasFewSnippets(
   }
 }
 
+async function testAmazonCollectsNegativeBucketsAndFiftyPositiveSamples() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY,
+    BRIGHTDATA_ZONE: process.env.BRIGHTDATA_ZONE,
+    BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS
+  };
+  const previousFetch = global.fetch;
+  const calls = [];
+
+  process.env.NODE_ENV = "test";
+  process.env.BRIGHTDATA_API_KEY = "brd-test";
+  process.env.BRIGHTDATA_ZONE = "web_unlocker1";
+  process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "200";
+
+  global.fetch = async (url, options = {}) => {
+    assert.strictEqual(String(url), "https://api.brightdata.com/request");
+    const body = JSON.parse(options.body || "{}");
+    calls.push(body.url);
+    const target = String(body.url);
+    const pageNumber = Number(target.match(/pageNumber=(\d+)/)?.[1] || 1);
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ") && target.includes("filterByStar=critical")) {
+      return new Response(`
+        <html><body>
+          ${Array.from({ length: 4 }, (_, index) => `
+            <div data-hook="review"><span data-hook="review-body">Critical page ${pageNumber} complaint ${index + 1}: strips slipped, results faded quickly, packaging arrived damaged.</span></div>
+          `).join("")}
+        </body></html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ") && target.includes("filterByStar=positive")) {
+      return new Response(`
+        <html><body>
+          ${Array.from({ length: 12 }, (_, index) => `
+            <div data-hook="review"><span data-hook="review-body">Positive page ${pageNumber} praise ${index + 1}: great whitening results, easy routine, excellent quality, recommend for events.</span></div>
+          `).join("")}
+        </body></html>
+      `, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    if (target.includes("/product-reviews/B0F42ZTSZZ")) {
+      return new Response(`<html><body></body></html>`, { status: 200, headers: { "Content-Type": "text/html" } });
+    }
+
+    return new Response(`
+      <html>
+        <head><title>Hismile Whitening Treatment</title></head>
+        <body>
+          <span itemprop="ratingValue" content="3.8"></span>
+          <span itemprop="reviewCount" content="2470"></span>
+          <div id="landingImage" data-a-dynamic-image='{"https://m.media-amazon.com/images/I/main.jpg":[1000,1000]}'></div>
+        </body>
+      </html>
+    `, { status: 200, headers: { "Content-Type": "text/html" } });
+  };
+
+  try {
+    clearApiModule();
+    const { scanProductLink } = require(path.join(root, "api/generate.js"));
+    const result = await scanProductLink(
+      "https://www.amazon.com/Hismile-Whitening-Treatment-Combining-Correction/dp/B0F42ZTSZZ?ref_=ast_sto_dp&th=1",
+      { market: "us" }
+    );
+
+    assert(calls.some((url) => String(url).includes("filterByStar=critical") && String(url).includes("pageNumber=5")), `expected multiple critical pages, got ${JSON.stringify(calls)}`);
+    assert(calls.some((url) => String(url).includes("filterByStar=positive") && String(url).includes("pageNumber=5")), `expected enough positive pages for 50 samples, got ${JSON.stringify(calls)}`);
+    assert(Array.isArray(result.review_insights.negative_snippets), "negative review snippets should be separated for pain-point analysis.");
+    assert(Array.isArray(result.review_insights.positive_snippets), "positive review snippets should be separated for selling-point analysis.");
+    assert(result.review_insights.negative_snippets.length >= 20, `expected many negative snippets, got ${result.review_insights.negative_snippets.length}`);
+    assert.strictEqual(result.review_insights.positive_snippets.length, 50);
+    assert.match(result.review_insights.negative_snippets.join(" "), /results faded quickly/);
+    assert.match(result.review_insights.positive_snippets.join(" "), /great whitening results/);
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModule();
+  }
+}
+
 async function testPlatformReviewSectionsArePreferredOverPageWideFallback() {
   const previousNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = "test";
@@ -535,6 +616,8 @@ async function testReviewEvidenceIsSentToModelAnalysis() {
       assert.match(userMessage, /customer_pain_points/);
       assert.match(userMessage, /优先分析差评/);
       assert.match(userMessage, /优质评价用于统计优质卖点/);
+      assert.match(userMessage, /negative_snippets/);
+      assert.match(userMessage, /positive_snippets/);
       assert.match(userMessage, /Great whitening strips/);
       assert.match(userMessage, /Packaging arrived damaged/);
       return new Response(JSON.stringify({
@@ -564,6 +647,8 @@ async function testReviewEvidenceIsSentToModelAnalysis() {
               evidence_summary: {
                 source_count: 1,
                 snippet_count: 2,
+                negative_snippet_count: 1,
+                positive_snippet_count: 1,
                 rating_average: 4.5,
                 review_count_total: 789
               },
@@ -624,6 +709,12 @@ async function testReviewEvidenceIsSentToModelAnalysis() {
               "Great whitening strips, easy daily use, visible results after a few days.",
               "Packaging arrived damaged but the product still worked well for coffee stains."
             ],
+            positive_snippets: [
+              "Great whitening strips, easy daily use, visible results after a few days."
+            ],
+            negative_snippets: [
+              "Packaging arrived damaged but the product still worked well for coffee stains."
+            ],
             positive_terms: [{ term: "easy", count: 1 }],
             negative_terms: [{ term: "packaging", count: 1 }],
             scene_terms: [{ term: "daily", count: 1 }]
@@ -643,6 +734,8 @@ async function testReviewEvidenceIsSentToModelAnalysis() {
     assert.deepStrictEqual(result.result.review_modifier_analysis.evidence_summary, {
       source_count: 1,
       snippet_count: 2,
+      negative_snippet_count: 1,
+      positive_snippet_count: 1,
       rating_average: 4.5,
       review_count_total: 789
     });
@@ -708,6 +801,8 @@ async function testRatingOnlyReviewEvidenceStillShowsConcreteStats() {
     assert.deepStrictEqual(review.evidence_summary, {
       source_count: 1,
       snippet_count: 0,
+      negative_snippet_count: 0,
+      positive_snippet_count: 0,
       rating_average: 4.7,
       review_count_total: 1234
     });
@@ -799,6 +894,7 @@ async function run() {
   await testAmazonNegativeReviewPagesArePrioritized();
   await testAmazonPositiveReviewPagesFeedHighQualitySellingPoints();
   await testAmazonReviewPagesAreFetchedEvenWhenProductPageHasFewSnippets();
+  await testAmazonCollectsNegativeBucketsAndFiftyPositiveSamples();
   await testPlatformReviewSectionsArePreferredOverPageWideFallback();
   await testReviewEvidenceIsSentToModelAnalysis();
   await testRatingOnlyReviewEvidenceStillShowsConcreteStats();
