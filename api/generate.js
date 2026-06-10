@@ -16,6 +16,7 @@ const MAX_POSITIVE_REVIEW_SNIPPETS = 50;
 const AMAZON_LOW_STAR_REVIEW_PAGES = 5;
 const AMAZON_REVIEW_FALLBACK_PAGES = 5;
 const AMAZON_FIVE_STAR_REVIEW_PAGES = 5;
+const SUPPLEMENTAL_REVIEW_FETCH_CONCURRENCY = 4;
 const PAGE_TEXT_SAMPLE_LENGTH = 4000;
 const DEFAULT_MAX_COMPLETION_TOKENS = 900;
 const DEFAULT_SYNTHESIS_MAX_TOKENS = 4200;
@@ -1099,18 +1100,25 @@ async function fetchSupplementalReviewInsights(url, signal) {
   const reviewUrls = amazonReviewUrls(url);
   if (!reviewUrls.length || !process.env.BRIGHTDATA_API_KEY) return null;
   let merged = null;
-  for (const reviewUrl of reviewUrls) {
+  for (let index = 0; index < reviewUrls.length; index += SUPPLEMENTAL_REVIEW_FETCH_CONCURRENCY) {
     const negativeFull = (merged?.negative_snippets?.length || 0) >= MAX_NEGATIVE_REVIEW_SNIPPETS;
     const positiveFull = (merged?.positive_snippets?.length || 0) >= MAX_POSITIVE_REVIEW_SNIPPETS;
     if (negativeFull && positiveFull) break;
-    try {
-      const { response, html } = await fetchProductHtml(reviewUrl, signal);
-      if (!response.ok || isBotProtectionPage(html, response.url)) continue;
-      merged = mergeReviewInsights(merged, extractReviewInsights(html, "amazon", {
-        sentimentBucket: reviewSentimentBucketFromUrl(reviewUrl)
-      }));
-    } catch {
-      continue;
+
+    const batch = reviewUrls.slice(index, index + SUPPLEMENTAL_REVIEW_FETCH_CONCURRENCY);
+    const batchResults = await Promise.all(batch.map(async (reviewUrl) => {
+      try {
+        const { response, html } = await fetchProductHtml(reviewUrl, signal);
+        if (!response.ok || isBotProtectionPage(html, response.url)) return null;
+        return extractReviewInsights(html, "amazon", {
+          sentimentBucket: reviewSentimentBucketFromUrl(reviewUrl)
+        });
+      } catch {
+        return null;
+      }
+    }));
+    for (const insights of batchResults) {
+      if (insights) merged = mergeReviewInsights(merged, insights);
     }
   }
   return merged;

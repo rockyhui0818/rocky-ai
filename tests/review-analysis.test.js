@@ -623,6 +623,68 @@ async function testAmazonCollectsExplicitOneTwoAndFiveStarPages() {
   }
 }
 
+async function testAmazonSupplementalReviewPagesFetchInParallelBatches() {
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    BRIGHTDATA_API_KEY: process.env.BRIGHTDATA_API_KEY,
+    BRIGHTDATA_ZONE: process.env.BRIGHTDATA_ZONE,
+    BRIGHTDATA_LINK_SCAN_TIMEOUT_MS: process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS
+  };
+  const previousFetch = global.fetch;
+  let activeReviewFetches = 0;
+  let maxActiveReviewFetches = 0;
+
+  process.env.NODE_ENV = "test";
+  process.env.BRIGHTDATA_API_KEY = "brd-test";
+  process.env.BRIGHTDATA_ZONE = "web_unlocker1";
+  process.env.BRIGHTDATA_LINK_SCAN_TIMEOUT_MS = "300";
+
+  global.fetch = async (url, options = {}) => {
+    assert.strictEqual(String(url), "https://api.brightdata.com/request");
+    const body = JSON.parse(options.body || "{}");
+    const target = String(body.url);
+    const isReviewPage = target.includes("/product-reviews/B0F42ZTSZZ");
+    if (isReviewPage) {
+      activeReviewFetches += 1;
+      maxActiveReviewFetches = Math.max(maxActiveReviewFetches, activeReviewFetches);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      activeReviewFetches -= 1;
+      const bucketText = target.includes("five_star") || target.includes("positive")
+        ? "Five star praise: great whitening results, easy routine, excellent quality."
+        : "Low star complaint: results faded quickly, package arrived damaged, strips slipped.";
+      return new Response(`<html><body><div data-hook="review"><span data-hook="review-body">${bucketText}</span></div></body></html>`, {
+        status: 200,
+        headers: { "Content-Type": "text/html" }
+      });
+    }
+
+    return new Response(`
+      <html>
+        <head><title>Hismile Whitening Treatment</title></head>
+        <body>
+          <span itemprop="ratingValue" content="3.8"></span>
+          <span itemprop="reviewCount" content="2470"></span>
+          <div id="landingImage" data-a-dynamic-image='{"https://m.media-amazon.com/images/I/main.jpg":[1000,1000]}'></div>
+        </body>
+      </html>
+    `, { status: 200, headers: { "Content-Type": "text/html" } });
+  };
+
+  try {
+    clearApiModule();
+    const { scanProductLink } = require(path.join(root, "api/generate.js"));
+    await scanProductLink(
+      "https://www.amazon.com/Hismile-Whitening-Treatment-Combining-Correction/dp/B0F42ZTSZZ?ref_=ast_sto_dp&th=1",
+      { market: "us" }
+    );
+    assert(maxActiveReviewFetches > 1, `expected supplemental review pages to fetch in parallel batches, got max concurrency ${maxActiveReviewFetches}`);
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(previousEnv);
+    clearApiModule();
+  }
+}
+
 async function testPlatformReviewSectionsArePreferredOverPageWideFallback() {
   const previousNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = "test";
@@ -987,6 +1049,7 @@ async function run() {
   await testAmazonReviewPagesAreFetchedEvenWhenProductPageHasFewSnippets();
   await testAmazonCollectsNegativeBucketsAndFiftyPositiveSamples();
   await testAmazonCollectsExplicitOneTwoAndFiveStarPages();
+  await testAmazonSupplementalReviewPagesFetchInParallelBatches();
   await testPlatformReviewSectionsArePreferredOverPageWideFallback();
   await testReviewEvidenceIsSentToModelAnalysis();
   await testRatingOnlyReviewEvidenceStillShowsConcreteStats();
